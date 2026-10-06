@@ -373,7 +373,7 @@ function suiteApis_(t) {
   });
   t.test('Meta: класифікація помилок (5xx і коди 4/17/32/613 — ретрай; 190 — токен)', function () {
     t.eq(classifyMetaError(makeMetaError_(500, null)).retry, true);
-    [4, 17, 32, 613].forEach(function (c) {
+    [1, 2, 4, 17, 32, 613].forEach(function (c) {
       t.eq(classifyMetaError(makeMetaError_(400, { error: { code: c } })).retry, true, 'код ' + c);
     });
     const tok = makeMetaError_(400, { error: { code: 190, message: 'Invalid OAuth' } });

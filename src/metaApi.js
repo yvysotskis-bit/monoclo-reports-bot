@@ -2,7 +2,8 @@
 // VERIFY: назви полів/параметрів не звірені з документацією (з середовища розробки вона недоступна);
 // їх перевіряє discoverActions(), який друкує реальні відповіді акаунта.
 
-const META_RETRY_CODES = [4, 17, 32, 613];
+// 4/17/32/613 — ліміти запитів (ТЗ); 1 і 2 — тимчасові збої сервісу Meta ("Service temporarily unavailable")
+const META_RETRY_CODES = [1, 2, 4, 17, 32, 613];
 
 function makeMetaError_(http, body) {
   const err = (body && body.error) || {};

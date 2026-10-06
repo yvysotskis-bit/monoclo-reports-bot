@@ -219,6 +219,19 @@ function suiteFlow_(t) {
     t.eq(deps.calls.alerts.length, 1);
     t.ok(deps.calls.logs.some(function (l) { return l.indexOf('WARN') === 0 && l.indexOf('42') !== -1; }));
   });
+  t.test('відомі сторонні джерела (keycrm_source_other_ids): без алерта; невідомі — з алертом', function () {
+    function runWith(ignoredIds) {
+      const deps = makeMemDeps_({ settings: fxSettings({ keycrm_source_other_ids: ignoredIds }) });
+      const orig = deps.fetchOrders;
+      deps.fetchOrders = function (f, to) {
+        return orig(f, to).concat([Object.assign(fxOrder_(777, FX_DATE, 'other', {}, true, 100), { source_id: '42' })]);
+      };
+      runDailyReportWith(deps, { send: false });
+      return deps.calls.alerts.length;
+    }
+    t.eq(runWith(''), 1);
+    t.eq(runWith('42, 43'), 0);
+  });
   t.test('reclassifyOrders: зміна правил перераховує channel і CRM_Daily без запитів до API', function () {
     const deps = makeMemDeps_();
     runDailyReportWith(deps, { send: false });

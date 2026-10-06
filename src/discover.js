@@ -373,6 +373,39 @@ function checkDay() {
     .forEach(function (r) {
       rows.push(['Лог ' + r.level, r.timestamp, String(r.message).slice(0, 400), '', '', '']);
     });
+  // список замовлень Monoclo за день з датою створення і датою замовлення (для звірки з KeyCRM)
+  try {
+    const settings = deps.getSettings();
+    const ids = settingList(settings, 'keycrm_source_site_ids')
+      .concat(settingList(settings, 'keycrm_source_quickorders_ids'))
+      .concat(settingList(settings, 'keycrm_source_instagram_ids'));
+    const listed = [];
+    fetchKeycrmRawOrders(addDays(date, -1), addDays(date, 1), settings).forEach(function (r) {
+      const sid = String(pickPath(r, KEYCRM_FIELDS.sourceId));
+      if (ids.indexOf(sid) === -1) return;
+      const c = parseTimestamp(pickPath(r, KEYCRM_FIELDS.createdAt), 'UTC');
+      const od = parseTimestamp(r.ordered_at, 'UTC');
+      const cDay = isFinite(c) ? dateInTz(new Date(c), KYIV_TZ) : '';
+      const oDay = isFinite(od) ? dateInTz(new Date(od), KYIV_TZ) : '';
+      if (cDay !== date && oDay !== date) return;
+      listed.push([
+        'замовлення ' + classifySource(sid, settings),
+        'id=' + r.id + ' статус=' + r.status_id,
+        'створено(Київ)=' + (isFinite(c) ? dateTimeInTz(new Date(c), KYIV_TZ) : '?'),
+        'замовлено(Київ)=' + (isFinite(od) ? dateTimeInTz(new Date(od), KYIV_TZ) : '?'),
+        'сума=' + r.grand_total,
+        cDay !== oDay ? 'ДАТИ РІЗНІ' : ''
+      ]);
+    });
+    listed.sort(function (a, b) {
+      return a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0;
+    });
+    listed.slice(0, 70).forEach(function (r) {
+      rows.push(r);
+    });
+  } catch (e) {
+    rows.push(['список замовлень', 'ПОМИЛКА', errText_(e), '', '', '']);
+  }
   discoverOut_(deps.store, 'checkDay ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
   console.log('checkDay: результат у листі «Discover»');
 }

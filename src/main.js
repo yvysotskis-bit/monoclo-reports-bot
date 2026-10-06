@@ -72,8 +72,9 @@ function rebuildCrmDaily_(store, dates) {
 // Нове невідоме джерело: попередження в Лог і не частіше разу на добу — в алерт-чат
 function warnUnknownSources_(deps, orders) {
   const ids = {};
+  const ignored = settingList(deps.getSettings(), 'keycrm_source_other_ids');
   orders.forEach(function (o) {
-    if (o.source_group === 'other') ids[o.source_id || '(порожньо)'] = true;
+    if (o.source_group === 'other' && ignored.indexOf(String(o.source_id)) === -1) ids[o.source_id || '(порожньо)'] = true;
   });
   const list = Object.keys(ids);
   if (!list.length) return;
