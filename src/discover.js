@@ -283,30 +283,29 @@ function checkShopify() {
     return siteIds.indexOf(String(pickPath(r, KEYCRM_FIELDS.sourceId))) !== -1;
   });
   rows.push(['замовлень KeyCRM (сайт+QuickOrders) за 7 днів', raws.length, '', '', '', '']);
-  const sample = raws.slice(0, 6);
+  const sample = raws.slice(0, 12);
   sample.forEach(function (r) {
-    const gid = shopifyOrderGid(r);
-    rows.push(['KeyCRM order', 'id=' + r.id, 'source_uuid=' + r.source_uuid, 'gid=' + (gid || 'НЕ ВИЗНАЧЕНО (source_uuid не схожий на ID Shopify)'), '', '']);
+    rows.push(['KeyCRM order', 'id=' + r.id, 'source_uuid=' + r.source_uuid, 'ключ пошуку=' + (shopifyLookupKey(r) || 'немає (не Shopify)'), '', '']);
   });
-  const gids = sample
-    .map(shopifyOrderGid)
+  const keys = sample
+    .map(shopifyLookupKey)
     .filter(Boolean);
-  if (gids.length) {
+  if (keys.length) {
     try {
-      const journeys = fetchShopifyJourneys(gids);
-      gids.forEach(function (gid) {
-        const j = journeys[gid];
+      const journeys = fetchShopifyJourneys(keys);
+      keys.forEach(function (key) {
+        const j = journeys[key];
         if (!j) {
-          rows.push(['Shopify', gid, 'замовлення не знайдено або немає journey', '', '', '']);
+          rows.push(['Shopify', key, 'замовлення не знайдено або немає journey', '', '', '']);
           return;
         }
         const utm = journeyToUtm(j);
         rows.push([
           'Shopify',
-          gid,
+          key,
           'ready=' + j.ready,
-          utm ? 'src=' + utm.utm_source + ' med=' + utm.utm_medium + ' camp=' + utm.utm_campaign : 'UTM НЕМАЄ',
-          'last: ' + String(j.lastVisit && j.lastVisit.landingPage).slice(0, 150),
+          utm ? 'src=' + utm.utm_source + ' med=' + utm.utm_medium + ' camp=' + utm.utm_campaign + ' content=' + utm.utm_content : 'UTM НЕМАЄ',
+          'last: ' + String(j.lastVisit && j.lastVisit.landingPage).slice(0, 150) + ' | src=' + String(j.lastVisit && j.lastVisit.source),
           'first: ' + String(j.firstVisit && j.firstVisit.landingPage).slice(0, 150)
         ]);
       });

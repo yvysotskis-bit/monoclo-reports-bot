@@ -474,6 +474,15 @@ function suiteShopify_(t) {
     t.eq(shopifyOrderGid({ source_uuid: '' }), null);
     t.eq(shopifyOrderGid({}), null);
   });
+  t.test('Shopify: ключ пошуку (номер замовлення M-CL6309, ID, QuickOrders не шукаємо)', function () {
+    t.eq(shopifyLookupKey({ source_uuid: 'M-CL6309' }), 'name:M-CL6309');
+    t.eq(shopifyLookupKey({ source_uuid: '#1001' }), 'name:1001');
+    t.eq(shopifyLookupKey({ source_uuid: '6012345678901' }), 'gid:gid://shopify/Order/6012345678901');
+    t.eq(shopifyLookupKey({ source_uuid: 'quick-20261006-152207' }), null);
+    t.eq(shopifyLookupKey({ source_uuid: '' }), null);
+    t.eq(shopifyLookupKey({ source_uuid: 'без цифр' }), null);
+    t.eq(shopifyLookupKey({}), null);
+  });
   t.test('Shopify: UTM із шляху клієнта (останній візит, потім перший; gclid/fbclid із landingPage)', function () {
     const last = { utmParameters: { source: 'ig', medium: 'paid', campaign: '123', content: '456', term: '789' }, landingPage: '/products/x?utm_source=ig' };
     t.eq(journeyToUtm({ lastVisit: last, firstVisit: null }).utm_source, 'ig');

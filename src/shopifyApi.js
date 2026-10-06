@@ -46,6 +46,19 @@ function shopifyOrderGid(raw) {
   return m ? 'gid://shopify/Order/' + m[1] : null;
 }
 
+// Ключ пошуку замовлення Shopify за замовленням KeyCRM:
+//  - довге число (≥10 цифр) або gid -> 'gid:gid://shopify/Order/…'
+//  - номер/назва замовлення Shopify (напр. "M-CL6309") -> 'name:M-CL6309'
+//  - внутрішні ідентифікатори QuickOrders ("quick-…") і порожнє -> null
+function shopifyLookupKey(raw) {
+  const gid = shopifyOrderGid(raw);
+  if (gid) return 'gid:' + gid;
+  const v = String(raw && raw.source_uuid != null ? raw.source_uuid : '').trim();
+  if (!v || /^quick-/i.test(v)) return null;
+  if (/^#?[A-Za-z0-9][A-Za-z0-9._-]*$/.test(v) && /\d/.test(v)) return 'name:' + v.replace(/^#/, '');
+  return null;
+}
+
 function visitToUtm_(v) {
   if (!v) return null;
   const p = v.utmParameters || {};
@@ -140,17 +153,52 @@ function shopifyGraphql_(query, variables) {
   );
 }
 
-// gids -> {gid: journeySummary|null}; замовлення, яких немає в Shopify, дають null
-function fetchShopifyJourneys(gids) {
-  const out = {};
+const SHOPIFY_JOURNEY_FIELDS = 'customerJourneySummary { ready firstVisit { ' + SHOPIFY_VISIT_FIELDS + ' } lastVisit { ' + SHOPIFY_VISIT_FIELDS + ' } }';
+const SHOPIFY_NAME_BATCH = 10;
+
+function fetchByGid_(gids, out) {
   for (let i = 0; i < gids.length; i += SHOPIFY_BATCH) {
     const chunk = gids.slice(i, i + SHOPIFY_BATCH);
     const data = shopifyGraphql_(SHOPIFY_NODES_QUERY, { ids: chunk });
     chunk.forEach(function (gid, k) {
       const n = data.nodes && data.nodes[k];
-      out[gid] = n && n.customerJourneySummary ? n.customerJourneySummary : null;
+      out['gid:' + gid] = n && n.customerJourneySummary ? n.customerJourneySummary : null;
     });
   }
+}
+
+// Пошук за назвою замовлення (query: name:"M-CL6309"); збіг перевіряється за точною назвою
+function fetchByName_(names, out) {
+  for (let i = 0; i < names.length; i += SHOPIFY_NAME_BATCH) {
+    const chunk = names.slice(i, i + SHOPIFY_NAME_BATCH);
+    const vars = {};
+    const defs = [];
+    const body = [];
+    chunk.forEach(function (n, k) {
+      vars['q' + k] = 'name:"' + String(n).replace(/"/g, '') + '"';
+      defs.push('$q' + k + ': String!');
+      body.push('o' + k + ': orders(first: 1, query: $q' + k + ') { nodes { id name ' + SHOPIFY_JOURNEY_FIELDS + ' } }');
+    });
+    const data = shopifyGraphql_('query(' + defs.join(', ') + ') { ' + body.join(' ') + ' }', vars);
+    chunk.forEach(function (n, k) {
+      const nodes = data['o' + k] && data['o' + k].nodes;
+      const node = nodes && nodes[0];
+      out['name:' + n] = node && String(node.name).replace(/^#/, '') === n && node.customerJourneySummary ? node.customerJourneySummary : null;
+    });
+  }
+}
+
+// keys (результат shopifyLookupKey) -> {key: journeySummary|null}; невідоме замовлення дає null
+function fetchShopifyJourneys(keys) {
+  const out = {};
+  const gids = [];
+  const names = [];
+  keys.forEach(function (k) {
+    if (k.indexOf('gid:') === 0) gids.push(k.slice(4));
+    else if (k.indexOf('name:') === 0) names.push(k.slice(5));
+  });
+  if (gids.length) fetchByGid_(gids, out);
+  if (names.length) fetchByName_(names, out);
   return out;
 }
 
@@ -172,17 +220,17 @@ function buildShopifyFallback_(raws, settings, existing) {
       };
       return;
     }
-    const gid = shopifyOrderGid(raw);
-    if (gid) need.push({ id: id, gid: gid });
+    const key = shopifyLookupKey(raw);
+    if (key) need.push({ id: id, key: key });
   });
   if (need.length) {
     const journeys = fetchShopifyJourneys(
       need.map(function (n) {
-        return n.gid;
+        return n.key;
       })
     );
     need.forEach(function (n) {
-      found[n.id] = journeyToUtm(journeys[n.gid]);
+      found[n.id] = journeyToUtm(journeys[n.key]);
     });
   }
   return function (raw) {
