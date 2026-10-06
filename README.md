@@ -6,24 +6,25 @@ Google Apps Script, прив'язаний до Google-таблиці. Щодня
 
 Реалізовано: ядро + щоденний звіт Meta, **Повідомлення 1 «Загальна картина»**. Частина Б (товарний звіт) не чіпалась, але закладена (див. «Розширення»).
 
-## Статус звірки з документацією API — прочитайте першим
+## Статус звірки з API — результати discover (06.10.2026)
 
-З середовища розробки документація Meta та KeyCRM була недоступна, тому **назви полів API не вигадувались і не вважаються звіреними**:
-
-* Усе, що стосується KeyCRM (ендпоінти, фільтр дати, `include`, шляхи до UTM-полів, пагінація, ліміти), — **гіпотеза** в одному місці: константи `KEYCRM_*` у `src/keycrmApi.js` (позначені `VERIFY`).
-* Meta: використано поля з ТЗ (`spend, impressions, reach, inline_link_clicks, actions, action_values`, `destination_type`) і стандартну пагінацію `paging.next`. Версія Graph API береться лише з `META_API_VERSION` (у коді дефолту немає — перевірте актуальну версію).
-* Реальні дані покажуть `discoverActions()` і `discoverKeycrm()` → лист `Discover`. Після їх запуску поля в `keycrmApi.js` уточнюються (це робиться разом, до `backfill`).
-
-Заповніть після `discoverKeycrm` (ТЗ, розд. 11):
+З середовища розробки документація Meta і KeyCRM була недоступна, тому поля звірялись на **реальних даних акаунтів** через `discoverActions` / `discoverKeycrm` / `checkShopify` / `checkDay` (лист `Discover`).
 
 | Що | Результат |
 |---|---|
-| Фактичні ендпоінти й поля KeyCRM | _заповнити_ |
-| Частка замовлень з UTM: Сайт / QuickOrders / Instagram (за 30 днів) | _заповнити_ |
-| Чи потрібен резерв Shopify (поріг 70% для `site`) | _заповнити_ |
-| Чи передаються UTM у QuickOrders | _заповнити_ |
-| Часова зона дат KeyCRM (`keycrm_naive_timestamp_tz`) | _заповнити_ |
-| Розбіжності мапінгу подій Meta | _заповнити після `discoverActions`_ |
+| Ендпоінти KeyCRM (підтверджено) | `GET /order` (фільтр `filter[created_between]`, `include=marketing`, пагінація `page`/`limit=50`), `GET /order/source`, `GET /order/status` |
+| Поля замовлення KeyCRM | `id`, `source_id`, `status_id`, `grand_total`, `created_at`, `ordered_at`, `source_uuid`, `marketing{utm_source, utm_medium, utm_campaign, utm_term, utm_content}` (для більшості замовлень `marketing = null`); `gclid`/`fbclid` у KeyCRM немає |
+| Дати | з `Z` (UTC, мікросекунди); день замовлення = `ordered_at` (так групує KeyCRM) |
+| Джерела Monoclo | Сайт \| Monoclo = **212**, Monoclo QuickOrders = **216**, Інстаграм \| Monoclo = **198** |
+| Статуси «не рахуються» | група 6: `13,14,15,18,19,24,25,26,40` (скасовані й повернені) |
+| Частка замовлень з UTM у KeyCRM (30 днів) | Сайт 0% (0 з 433), QuickOrders 2,6% (1 з 38), Instagram 0% (UTM для нього не потрібні) |
+| Потрібен резерв Shopify (поріг 70%) | **так** — реалізовано (`shopifyApi.js`, `shopify_utm_fallback`) |
+| Зв'язок KeyCRM → Shopify | `source_uuid` сайту = номер замовлення Shopify (`M-CL6309`); пошук за `name`. QuickOrders (`quick-…`) у Shopify не існують — їхні мітки KeyCRM передає сам |
+| Мітки у Shopify | з'явилися лише з 06.10.2026 (раніше замовлення без UTM) |
+| UTM у QuickOrders | передаються рідко (1 з 38) |
+| Мапінг подій Meta | усі `omni_*`, `messaging_conversation_started_7d`, `messaging_first_reply` присутні; розбіжностей немає |
+| Валюта акаунтів Meta | USD (чотири акаунти Mono Clo); витрати переводяться в UAH за курсом НБУ |
+| Курс НБУ | працює `NBU_Exchange/exchange_site`; шлях `statdirective/exchange` повертає 404 |
 
 ## Відхилення від ТЗ (знайдені під час реалізації)
 
