@@ -262,3 +262,58 @@ function checkFxRate() {
   discoverOut_(deps.store, 'checkFxRate ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
   console.log('checkFxRate: результат у листі «Discover»');
 }
+
+// Діагностика Shopify: автентифікація, зв'язок замовлень KeyCRM -> Shopify і мітки з "шляху клієнта".
+// У вивід не потрапляють персональні дані: лише ID/номер замовлення, джерело переходу, UTM, шлях сторінки.
+function checkShopify() {
+  const deps = defaultDeps();
+  const settings = deps.getSettings();
+  const to = yesterday_(deps);
+  const rows = [];
+  try {
+    shopifyToken_();
+    rows.push(['автентифікація', 'OK', '', '', '', '']);
+  } catch (e) {
+    rows.push(['автентифікація', 'ПОМИЛКА', errText_(e), '', '', '']);
+    discoverOut_(deps.store, 'checkShopify ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
+    return;
+  }
+  const siteIds = settingList(settings, 'keycrm_source_site_ids').concat(settingList(settings, 'keycrm_source_quickorders_ids'));
+  const raws = fetchKeycrmRawOrders(addDays(to, -6), to, settings).filter(function (r) {
+    return siteIds.indexOf(String(pickPath(r, KEYCRM_FIELDS.sourceId))) !== -1;
+  });
+  rows.push(['замовлень KeyCRM (сайт+QuickOrders) за 7 днів', raws.length, '', '', '', '']);
+  const sample = raws.slice(0, 6);
+  sample.forEach(function (r) {
+    const gid = shopifyOrderGid(r);
+    rows.push(['KeyCRM order', 'id=' + r.id, 'source_uuid=' + r.source_uuid, 'gid=' + (gid || 'НЕ ВИЗНАЧЕНО (source_uuid не схожий на ID Shopify)'), '', '']);
+  });
+  const gids = sample
+    .map(shopifyOrderGid)
+    .filter(Boolean);
+  if (gids.length) {
+    try {
+      const journeys = fetchShopifyJourneys(gids);
+      gids.forEach(function (gid) {
+        const j = journeys[gid];
+        if (!j) {
+          rows.push(['Shopify', gid, 'замовлення не знайдено або немає journey', '', '', '']);
+          return;
+        }
+        const utm = journeyToUtm(j);
+        rows.push([
+          'Shopify',
+          gid,
+          'ready=' + j.ready,
+          utm ? 'src=' + utm.utm_source + ' med=' + utm.utm_medium + ' camp=' + utm.utm_campaign : 'UTM НЕМАЄ',
+          'last: ' + String(j.lastVisit && j.lastVisit.landingPage).slice(0, 150),
+          'first: ' + String(j.firstVisit && j.firstVisit.landingPage).slice(0, 150)
+        ]);
+      });
+    } catch (e) {
+      rows.push(['Shopify GraphQL', 'ПОМИЛКА', errText_(e), '', '', '']);
+    }
+  }
+  discoverOut_(deps.store, 'checkShopify ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
+  console.log('checkShopify: результат у листі «Discover»');
+}

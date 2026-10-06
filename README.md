@@ -107,7 +107,8 @@ Apps Script → ⚙ **Налаштування проєкту** → **Власт
 | `KEYCRM_API_KEY` | ключ KeyCRM |
 | `KEYCRM_API_BASE` | базова адреса Open API |
 
-Для Частини Б згодом: `SHOPIFY_STORE_DOMAIN`, `SHOPIFY_ADMIN_TOKEN`, `TG_PRODUCTS_CHAT_ID`.
+**Shopify (резервне джерело UTM, розділ 4.7):** `SHOPIFY_STORE_DOMAIN` (`xxx.myshopify.com`), `SHOPIFY_API_VERSION` (напр. `2026-07`) і одне з двох: `SHOPIFY_ADMIN_TOKEN` (старий постійний токен) або `SHOPIFY_CLIENT_ID` + `SHOPIFY_CLIENT_SECRET` (застосунок Dev Dashboard з правом `read_orders`; токен на 24 год скрипт отримує й кешує сам). Порядок: `checkShopify` → перевірити лист `Discover` → у `Налаштуваннях` поставити `shopify_utm_fallback = TRUE` → `reclassifyOrders` не потрібен, мітки підтягнуться при наступному завантаженні (`backfill30`). Права `read_orders` дають лише 60 днів історії замовлень.
+Для Частини Б згодом: `TG_PRODUCTS_CHAT_ID`.
 
 ### 6. Перший запуск (порядок з ТЗ)
 У редакторі Apps Script оберіть функцію зі списку й натисніть «Запустити» (перший раз потрібно дати дозволи):

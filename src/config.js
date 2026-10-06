@@ -23,6 +23,7 @@ const DEFAULT_SETTINGS = [
   ['utm_missing_warn_pct', 30, 'частка замовлень сайту без UTM: від цього % — 🟡'],
   ['meta_fx_mode', 'nbu', 'рахунки Meta не в UAH: nbu = офіційний курс НБУ на кожну дату; fixed = фіксований курс нижче'],
   ['meta_fx_fixed_rate', '', 'грн за 1 одиницю валюти рахунку (лише якщо meta_fx_mode = fixed)'],
+  ['shopify_utm_fallback', false, 'брати UTM із Shopify, якщо їх немає в KeyCRM (вмикати після успішного checkShopify)'],
   // додаткові (не з ТЗ) — технічні, потрібні через те, що документація API не звірена:
   ['keycrm_order_include', 'marketing', 'VERIFY: значення параметра include для /order (де лежать UTM)'],
   ['keycrm_naive_timestamp_tz', 'UTC', 'VERIFY: часова зона для дат KeyCRM без зсуву (UTC або Europe/Kyiv)']
@@ -99,11 +100,13 @@ function requireSecret(name) {
   return v;
 }
 
-const SECRET_NAMES = ['META_ACCESS_TOKEN', 'TG_BOT_TOKEN', 'KEYCRM_API_KEY'];
+const SECRET_NAMES = ['META_ACCESS_TOKEN', 'TG_BOT_TOKEN', 'KEYCRM_API_KEY', 'SHOPIFY_ADMIN_TOKEN', 'SHOPIFY_CLIENT_SECRET'];
+// Токени, отримані під час виконання (напр. Shopify client credentials), теж не повинні потрапляти в логи
+const EXTRA_SECRETS = [];
 
 function secretValues_() {
-  return SECRET_NAMES.map(getSecret).filter(function (v) {
-    return v.length >= 6;
+  return SECRET_NAMES.map(getSecret).concat(EXTRA_SECRETS).filter(function (v) {
+    return v && v.length >= 6;
   });
 }
 

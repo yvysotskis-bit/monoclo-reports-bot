@@ -111,7 +111,15 @@ function collectData(deps, from, to) {
   }
 
   try {
-    const orders = deps.fetchOrders(from, to, settings, rules);
+    const existing = {};
+    deps.store.read('KeyCRM_Orders').forEach(function (r) {
+      existing[String(r.order_id)] = r;
+    });
+    const orders = deps.fetchOrders(from, to, settings, rules, existing);
+    if (orders.shopifyError) {
+      deps.log('WARN', 'Shopify (резерв UTM) недоступний: ' + orders.shopifyError);
+      alertSafe_(deps, '⚠️ Резерв UTM із Shopify недоступний: ' + orders.shopifyError);
+    }
     upsertSheet(
       deps.store,
       'KeyCRM_Orders',

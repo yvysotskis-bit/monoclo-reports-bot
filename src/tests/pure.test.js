@@ -464,6 +464,47 @@ function suiteFx_(t) {
   });
 }
 
+function suiteShopify_(t) {
+  t.test('Shopify: домен, gid замовлення з source_uuid', function () {
+    t.eq(parseShopifyDomain('https://ibvza0-1g.myshopify.com/'), 'ibvza0-1g.myshopify.com');
+    t.eq(parseShopifyDomain('ibvza0-1g.myshopify.com'), 'ibvza0-1g.myshopify.com');
+    t.eq(shopifyOrderGid({ source_uuid: '6012345678901' }), 'gid://shopify/Order/6012345678901');
+    t.eq(shopifyOrderGid({ source_uuid: 'gid://shopify/Order/6012345678901' }), 'gid://shopify/Order/6012345678901');
+    t.eq(shopifyOrderGid({ source_uuid: '1234' }), null);
+    t.eq(shopifyOrderGid({ source_uuid: '' }), null);
+    t.eq(shopifyOrderGid({}), null);
+  });
+  t.test('Shopify: UTM із шляху клієнта (останній візит, потім перший; gclid/fbclid із landingPage)', function () {
+    const last = { utmParameters: { source: 'ig', medium: 'paid', campaign: '123', content: '456', term: '789' }, landingPage: '/products/x?utm_source=ig' };
+    t.eq(journeyToUtm({ lastVisit: last, firstVisit: null }).utm_source, 'ig');
+    t.eq(journeyToUtm({ lastVisit: { utmParameters: null, landingPage: null }, firstVisit: last }).utm_medium, 'paid');
+    const fromUrl = journeyToUtm({ lastVisit: { utmParameters: null, landingPage: '/?fbclid=AbC&utm_medium=social&utm_source=Facebook' } });
+    t.eq(fromUrl.fbclid, 'AbC');
+    t.eq(fromUrl.utm_source, 'Facebook');
+    t.eq(journeyToUtm({ lastVisit: { utmParameters: { source: null }, landingPage: '/' }, firstVisit: null }), null);
+    t.eq(journeyToUtm(null), null);
+    t.eq(urlParams_('/p?a=1&b=x%20y#frag'), { a: '1', b: 'x y' });
+  });
+  t.test('Shopify-мітки проходять через normalizeOrder (utm_origin = shopify) і дають meta_ads', function () {
+    const settings = fxSettings({ keycrm_source_site_ids: '212', keycrm_source_instagram_ids: '198' });
+    const o = normalizeOrder(
+      { id: 1, created_at: '2026-10-05T10:00:00.000000Z', source_id: 212, status_id: 1, grand_total: 1500, marketing: null, source_uuid: '6012345678901' },
+      { settings: settings, rules: parseRuleRows(DEFAULT_UTM_RULES), statusNames: {}, utmFallback: function () { return journeyToUtm({ lastVisit: { utmParameters: { source: 'ig', medium: 'paid' } } }); } }
+    );
+    t.eq(o.utm_origin, 'shopify');
+    t.eq(o.channel, 'meta_ads');
+  });
+  t.test('KeyCRM: дата з мікросекундами й Z розбирається; marketing = null не ламає нормалізацію', function () {
+    const o = normalizeOrder(
+      { id: 2, created_at: '2026-10-06T14:31:26.000000Z', source_id: 212, status_id: 1, grand_total: 100, marketing: null },
+      { settings: fxSettings({ keycrm_source_site_ids: '212' }), rules: parseRuleRows(DEFAULT_UTM_RULES), statusNames: {} }
+    );
+    t.eq(o.date, '2026-10-06');
+    t.eq(o.channel, 'no_utm');
+    t.eq(o.utm_origin, 'none');
+  });
+}
+
 function suiteKeycrm_(t) {
   const settings = fxSettings({
     keycrm_source_site_ids: '5', keycrm_source_quickorders_ids: '6', keycrm_source_instagram_ids: '7',
@@ -523,5 +564,5 @@ function suiteKeycrm_(t) {
 }
 
 function getTestSuites_() {
-  return [suiteFormat_, suiteDates_, suiteActions_, suiteAttribution_, suiteMetrics_, suiteRules_, suiteTelegram_, suiteStorage_, suiteApis_, suiteMetaAccounts_, suiteFx_, suiteKeycrm_, suiteMsg1_, suiteFlow_];
+  return [suiteFormat_, suiteDates_, suiteActions_, suiteAttribution_, suiteMetrics_, suiteRules_, suiteTelegram_, suiteStorage_, suiteApis_, suiteMetaAccounts_, suiteFx_, suiteShopify_, suiteKeycrm_, suiteMsg1_, suiteFlow_];
 }

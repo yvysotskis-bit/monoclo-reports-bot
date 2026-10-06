@@ -160,14 +160,28 @@ function fetchKeycrmStatusNames_() {
   return map;
 }
 
-// Нормалізовані замовлення в межах [from, to] за Києвом
-function fetchKeycrmOrders(from, to, settings, rules) {
+// Нормалізовані замовлення в межах [from, to] за Києвом.
+// existing — {order_id: рядок KeyCRM_Orders} (щоб не питати Shopify повторно про вже знайдені мітки).
+// Помилка резерву Shopify не валить завантаження: вона лишається у властивості результату .shopifyError.
+function fetchKeycrmOrders(from, to, settings, rules, existing) {
   const statusNames = fetchKeycrmStatusNames_();
-  return fetchKeycrmRawOrders(from, to, settings)
+  const raws = fetchKeycrmRawOrders(from, to, settings);
+  let fallback = null;
+  let shopifyError = '';
+  if (settingBool(settings, 'shopify_utm_fallback')) {
+    try {
+      fallback = buildShopifyFallback_(raws, settings, existing || {});
+    } catch (e) {
+      shopifyError = redactSecrets_(e && e.message ? e.message : String(e));
+    }
+  }
+  const orders = raws
     .map(function (raw) {
-      return normalizeOrder(raw, { settings: settings, rules: rules, statusNames: statusNames });
+      return normalizeOrder(raw, { settings: settings, rules: rules, statusNames: statusNames, utmFallback: fallback });
     })
     .filter(function (o) {
       return o.date >= from && o.date <= to;
     });
+  orders.shopifyError = shopifyError;
+  return orders;
 }
