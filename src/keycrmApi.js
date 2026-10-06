@@ -15,6 +15,7 @@ const KEYCRM_CREATED_FILTER = 'filter[created_between]'; // VERIFY: формат
 const KEYCRM_FIELDS = {
   id: ['id'],
   createdAt: ['created_at'],
+  orderedAt: ['ordered_at'], // дата замовлення (так само групують звіти KeyCRM); якщо порожня — created_at
   sourceId: ['source_id'],
   statusId: ['status_id'],
   grandTotal: ['grand_total'],
@@ -45,6 +46,9 @@ function normalizeOrder(raw, ctx) {
   const ts = parseTimestamp(pickPath(raw, F.createdAt), ctx.settings.keycrm_naive_timestamp_tz);
   if (!isFinite(ts)) throw new Error('KeyCRM: неможливо розібрати created_at замовлення ' + pickPath(raw, F.id));
   const when = new Date(ts);
+  // День замовлення — за ordered_at (як у звітах KeyCRM), інакше за created_at
+  const orderedTs = parseTimestamp(pickPath(raw, F.orderedAt), ctx.settings.keycrm_naive_timestamp_tz);
+  const orderDate = dateInTz(isFinite(orderedTs) ? new Date(orderedTs) : when, KYIV_TZ);
 
   const utm = {};
   ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid'].forEach(function (k) {
@@ -69,7 +73,7 @@ function normalizeOrder(raw, ctx) {
   return {
     order_id: String(pickPath(raw, F.id)),
     created_at_kyiv: dateTimeInTz(when, KYIV_TZ),
-    date: dateInTz(when, KYIV_TZ),
+    date: orderDate,
     source_id: sourceId,
     source_group: sourceGroup,
     status_id: statusId,

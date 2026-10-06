@@ -557,6 +557,14 @@ function suiteKeycrm_(t) {
     t.eq(norm({ id: 4, created_at: '2026-10-05 20:50:00', source_id: 5, status_id: 1 }, { keycrm_naive_timestamp_tz: 'UTC' }).date, '2026-10-05');
     t.eq(norm({ id: 5, created_at: '2026-10-05 21:10:00', source_id: 5, status_id: 1 }, { keycrm_naive_timestamp_tz: 'UTC' }).date, '2026-10-06');
   });
+  t.test('день замовлення — за ordered_at (як у звітах KeyCRM), інакше за created_at', function () {
+    // створено 06.10 09:41 за Києвом, замовлено 05.10 09:41 -> день 05.10
+    const o = norm({ id: 11, created_at: '2026-10-06T06:41:20.000000Z', ordered_at: '2026-10-05T06:41:20.000000Z', source_id: 7, status_id: 1, grand_total: 2450 });
+    t.eq(o.date, '2026-10-05');
+    t.eq(o.created_at_kyiv, '2026-10-06 09:41:20');
+    t.eq(norm({ id: 12, created_at: '2026-10-05T10:00:00.000000Z', source_id: 7, status_id: 1 }).date, '2026-10-05'); // без ordered_at
+    t.eq(norm({ id: 13, created_at: '2026-10-05T10:00:00.000000Z', ordered_at: null, source_id: 7, status_id: 1 }).date, '2026-10-05');
+  });
   t.test('джерело instagram -> meta_direct, невідоме -> other, без міток -> no_utm', function () {
     t.eq(norm({ id: 6, created_at: '2026-10-05 10:00:00', source_id: 7, status_id: 1, marketing: { utm_source: 'google', utm_medium: 'cpc' } }).channel, 'meta_direct');
     t.eq(norm({ id: 7, created_at: '2026-10-05 10:00:00', source_id: 42, status_id: 1 }).source_group, 'other');
