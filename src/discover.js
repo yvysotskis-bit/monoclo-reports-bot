@@ -85,7 +85,12 @@ function discoverActions() {
   const from = addDays(to, -6);
   const stamp = dateTimeInTz(deps.now(), KYIV_TZ);
 
-  const rows = fetchInsights({ level: 'account', since: from, until: to, fields: META_ACCOUNT_FIELDS });
+  let rows = [];
+  let adsets = [];
+  getMetaAccountIds().forEach(function (id) {
+    rows = rows.concat(fetchInsights({ accountId: id, level: 'account', since: from, until: to, fields: META_ACCOUNT_FIELDS }));
+    adsets = adsets.concat(fetchAdsets_(id));
+  });
   const types = collectActionTypes(rows);
   const picked = {};
   Object.keys(ACTION_MAP).forEach(function (metric) {
@@ -104,7 +109,6 @@ function discoverActions() {
     sheetRows.push(['мапінг', m, picked[m], 'варіанти: ' + ACTION_MAP[m].join(' > '), '', '']);
   });
 
-  const adsets = fetchAdsets_();
   const dest = {};
   adsets.forEach(function (a) {
     dest[a.destination_type || '(немає)'] = (dest[a.destination_type || '(немає)'] || 0) + 1;
@@ -114,6 +118,7 @@ function discoverActions() {
   });
   const direct = detectDirectCampaigns(adsets, settingList(deps.getSettings(), 'direct_campaign_ids'));
   sheetRows.push(['Direct-кампанії', direct.join(', ') || '(немає)', '', '', '', '']);
+  sheetRows.push(['акаунти Meta', getMetaAccountIds().join(', '), '', '', '', '']);
 
   discoverOut_(deps.store, 'discoverActions ' + stamp + ' (' + from + '…' + to + ')', sheetRows);
   sheetRows.forEach(function (r) {

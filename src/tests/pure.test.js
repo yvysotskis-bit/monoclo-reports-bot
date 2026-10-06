@@ -413,6 +413,26 @@ function suiteApis_(t) {
   });
 }
 
+function suiteMetaAccounts_(t) {
+  t.test('META_AD_ACCOUNT_ID: кілька акаунтів через кому, голі числа -> act_', function () {
+    t.eq(parseAccountIds('act_1, 22 ,act_3'), ['act_1', 'act_22', 'act_3']);
+    t.eq(parseAccountIds('act_5'), ['act_5']);
+    t.eq(parseAccountIds(''), []);
+  });
+  t.test('кілька акаунтів: метрики по датах складаються, дні без показів в одного акаунта не заважають', function () {
+    const a = [{ date: 'd1', spend: 100, impressions: 1000, reach: 800, purchases: 2, direct_spend: 10.5 }, { date: 'd2', spend: 0, impressions: 0, reach: 0, purchases: 0, direct_spend: 0 }];
+    const b = [{ date: 'd1', spend: 50, impressions: 500, reach: 400, purchases: 1, direct_spend: 0.25 }, { date: 'd2', spend: 20, impressions: 300, reach: 250, purchases: 0, direct_spend: 20 }];
+    const m = mergeAccountDays([a, b]);
+    t.eq(m.length, 2);
+    t.eq(m[0].spend, 150);
+    t.eq(m[0].impressions, 1500);
+    t.eq(m[0].purchases, 3);
+    t.near(m[0].direct_spend, 10.75);
+    t.eq(m[1].spend, 20);
+    t.eq(mergeAccountDays([a]).length, 2);
+  });
+}
+
 function suiteKeycrm_(t) {
   const settings = fxSettings({
     keycrm_source_site_ids: '5', keycrm_source_quickorders_ids: '6', keycrm_source_instagram_ids: '7',
@@ -472,5 +492,5 @@ function suiteKeycrm_(t) {
 }
 
 function getTestSuites_() {
-  return [suiteFormat_, suiteDates_, suiteActions_, suiteAttribution_, suiteMetrics_, suiteRules_, suiteTelegram_, suiteStorage_, suiteApis_, suiteKeycrm_, suiteMsg1_, suiteFlow_];
+  return [suiteFormat_, suiteDates_, suiteActions_, suiteAttribution_, suiteMetrics_, suiteRules_, suiteTelegram_, suiteStorage_, suiteApis_, suiteMetaAccounts_, suiteKeycrm_, suiteMsg1_, suiteFlow_];
 }

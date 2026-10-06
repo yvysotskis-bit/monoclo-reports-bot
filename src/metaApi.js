@@ -87,7 +87,7 @@ function fetchInsights(opts) {
     use_account_attribution_setting: 'true'
   };
   if (opts.breakdowns) params.breakdowns = opts.breakdowns;
-  return metaGetAll('/' + requireSecret('META_AD_ACCOUNT_ID') + '/insights', params);
+  return metaGetAll('/' + opts.accountId + '/insights', params);
 }
 
 const META_ACCOUNT_FIELDS = 'spend,impressions,reach,inline_link_clicks,actions,action_values';
@@ -144,15 +144,89 @@ function assembleMetaDays(accountRows, campaignRows, directIds, from, to) {
 
 // ---- I/O-оркестрація ----
 
-function fetchAdsets_() {
-  return metaGetAll('/' + requireSecret('META_AD_ACCOUNT_ID') + '/adsets', { fields: 'campaign_id,destination_type', limit: 500 });
+function fetchAdsets_(accountId) {
+  return metaGetAll('/' + accountId + '/adsets', { fields: 'campaign_id,destination_type', limit: 500 });
 }
 
-// Усе, що потрібно щоденному звіту за [from, to]: {days, directCampaigns}
-function fetchMetaDays(from, to, settings) {
-  const accountRows = fetchInsights({ level: 'account', since: from, until: to, fields: META_ACCOUNT_FIELDS });
-  const campaignRows = fetchInsights({ level: 'campaign', since: from, until: to, fields: META_CAMPAIGN_FIELDS });
+// META_AD_ACCOUNT_ID може містити кілька акаунтів через кому: "act_1, act_2".
+// Голі числа отримують префікс act_.
+function parseAccountIds(raw) {
+  return String(raw == null ? '' : raw)
+    .split(',')
+    .map(function (x) {
+      return x.trim();
+    })
+    .filter(function (x) {
+      return x !== '';
+    })
+    .map(function (x) {
+      return /^\d+$/.test(x) ? 'act_' + x : x;
+    });
+}
+
+function getMetaAccountIds() {
+  const ids = parseAccountIds(requireSecret('META_AD_ACCOUNT_ID'));
+  if (!ids.length) throw new Error('META_AD_ACCOUNT_ID порожній');
+  return ids;
+}
+
+// Складає дні кількох акаунтів в один набір: усі метрики — суми по датах.
+// УВАГА: reach між акаунтами додається як є (дублікати людей не усуваються), тому "Частота акаунта"
+// при кількох акаунтах трохи занижена.
+function mergeAccountDays(daysPerAccount) {
+  const byDate = {};
+  const order = [];
+  daysPerAccount.forEach(function (days) {
+    days.forEach(function (d) {
+      if (!byDate[d.date]) {
+        byDate[d.date] = Object.assign({}, d);
+        order.push(d.date);
+        return;
+      }
+      const acc = byDate[d.date];
+      Object.keys(d).forEach(function (k) {
+        if (k !== 'date') acc[k] = (Number(acc[k]) || 0) + (Number(d[k]) || 0);
+      });
+    });
+  });
+  return order.sort().map(function (date) {
+    const r = byDate[date];
+    r.direct_spend = Math.round(r.direct_spend * 100) / 100;
+    return r;
+  });
+}
+
+// Один акаунт: {days, directCampaigns}
+function fetchMetaAccountDays_(accountId, from, to, settings) {
+  const accountRows = fetchInsights({ accountId: accountId, level: 'account', since: from, until: to, fields: META_ACCOUNT_FIELDS });
+  const campaignRows = fetchInsights({ accountId: accountId, level: 'campaign', since: from, until: to, fields: META_CAMPAIGN_FIELDS });
   const override = settingList(settings, 'direct_campaign_ids');
-  const directIds = detectDirectCampaigns(override.length ? [] : fetchAdsets_(), override);
+  const directIds = detectDirectCampaigns(override.length ? [] : fetchAdsets_(accountId), override);
   return { days: assembleMetaDays(accountRows, campaignRows, directIds, from, to), directCampaigns: directIds };
+}
+
+// Усе, що потрібно щоденному звіту за [from, to], сума по всіх акаунтах: {days, directCampaigns}
+function fetchMetaDays(from, to, settings) {
+  const per = getMetaAccountIds().map(function (id) {
+    try {
+      return fetchMetaAccountDays_(id, from, to, settings);
+    } catch (e) {
+      e.message = '[' + id + '] ' + e.message; // нехай алерт покаже, який акаунт підвів
+      throw e;
+    }
+  });
+  const direct = [];
+  per.forEach(function (p) {
+    p.directCampaigns.forEach(function (c) {
+      if (direct.indexOf(c) === -1) direct.push(c);
+    });
+  });
+  return {
+    days: mergeAccountDays(
+      per.map(function (p) {
+        return p.days;
+      })
+    ),
+    directCampaigns: direct
+  };
 }
