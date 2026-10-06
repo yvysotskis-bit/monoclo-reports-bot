@@ -103,6 +103,7 @@ function collectData(deps, from, to) {
       })
     );
     deps.log('INFO', 'Meta: оновлено ' + m.days.length + ' дн. (' + from + '…' + to + '). Валюти акаунтів: ' + JSON.stringify(m.currencies || {}) + '. Direct-кампанії з витратами: ' + (m.directCampaigns.join(', ') || 'немає'));
+    if (m.fxFallback) deps.log('WARN', 'Курс НБУ недоступний — використано фіксований курс з налаштувань (meta_fx_fixed_rate)');
     res.metaOk = true;
   } catch (e) {
     deps.log('ERROR', 'Meta: ' + errText_(e));

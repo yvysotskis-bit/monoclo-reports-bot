@@ -214,8 +214,10 @@ function parseNbuRate(body, cc) {
   return null;
 }
 
-// Курс НБУ на дату; якщо на дату даних немає (вихідні/свята) — найближча попередня (до 7 днів назад)
+// Курс НБУ на дату; якщо на дату даних немає (вихідні/свята) — найближча попередня (до 7 днів назад).
+// Причину невдачі (HTTP-код / початок відповіді / виняток) додає в текст помилки.
 function fetchNbuRate_(cc, ymd, cache) {
+  let lastInfo = '';
   for (let back = 0; back <= 7; back++) {
     const d = addDays(ymd, -back);
     const key = cc + '|' + d;
@@ -223,18 +225,23 @@ function fetchNbuRate_(cc, ymd, cache) {
       let rate = null;
       try {
         const resp = UrlFetchApp.fetch(nbuUrl(cc, d), { muteHttpExceptions: true });
-        if (resp.getResponseCode() === 200) rate = parseNbuRate(JSON.parse(resp.getContentText()), cc);
+        const code = resp.getResponseCode();
+        const text = resp.getContentText();
+        if (code === 200) rate = parseNbuRate(JSON.parse(text), cc);
+        if (!rate) lastInfo = 'HTTP ' + code + ': ' + String(text).slice(0, 120).replace(/\s+/g, ' ');
       } catch (e) {
-        rate = null;
+        lastInfo = 'виняток: ' + String(e && e.message ? e.message : e).slice(0, 160);
       }
       cache[key] = rate;
     }
     if (cache[key]) return cache[key];
   }
-  throw new Error('Не вдалося отримати курс НБУ для ' + cc + ' на ' + ymd);
+  throw new Error('Не вдалося отримати курс НБУ для ' + cc + ' на ' + ymd + (lastInfo ? ' (' + lastInfo + ')' : ''));
 }
 
-// {date: курс} для днів у валюті currency
+// {date: курс} для днів у валюті currency.
+// Режим nbu: курс НБУ на кожну дату; якщо НБУ недоступний і заповнено meta_fx_fixed_rate — береться він
+// (cache.fallbackUsed = true), інакше помилка. Режим fixed: лише meta_fx_fixed_rate.
 function getFxRates_(currency, dates, settings, cache) {
   const out = {};
   if (String(currency).toUpperCase() === 'UAH') {
@@ -243,8 +250,8 @@ function getFxRates_(currency, dates, settings, cache) {
     });
     return out;
   }
+  const fixed = settingNumOrNull(settings, 'meta_fx_fixed_rate');
   if (String(settings.meta_fx_mode).trim().toLowerCase() === 'fixed') {
-    const fixed = settingNumOrNull(settings, 'meta_fx_fixed_rate');
     if (!(fixed > 0)) throw new Error('meta_fx_mode = fixed, але meta_fx_fixed_rate не заповнено');
     dates.forEach(function (d) {
       out[d] = fixed;
@@ -252,7 +259,16 @@ function getFxRates_(currency, dates, settings, cache) {
     return out;
   }
   dates.forEach(function (d) {
-    out[d] = fetchNbuRate_(currency, d, cache);
+    try {
+      out[d] = fetchNbuRate_(currency, d, cache);
+    } catch (e) {
+      if (fixed > 0) {
+        out[d] = fixed;
+        cache.fallbackUsed = true;
+      } else {
+        throw e;
+      }
+    }
   });
   return out;
 }
@@ -327,6 +343,7 @@ function fetchMetaDays(from, to, settings) {
       })
     ),
     directCampaigns: direct,
-    currencies: currencies
+    currencies: currencies,
+    fxFallback: !!fxCache.fallbackUsed
   };
 }

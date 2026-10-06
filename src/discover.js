@@ -220,3 +220,28 @@ function discoverKeycrm() {
   deps.log('INFO', 'discoverKeycrm: результат (' + out.length + ' рядків) у листі «Discover»');
   console.log('discoverKeycrm: результат у листі «Discover»');
 }
+
+// Діагностика курсу НБУ: що саме повертає bank.gov.ua при запиті з Apps Script
+function checkFxRate() {
+  const deps = defaultDeps();
+  const ymd = yesterday_(deps);
+  const url = nbuUrl('USD', ymd);
+  const rows = [['запит', url, '', '', '', '']];
+  try {
+    const resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+    const text = resp.getContentText();
+    rows.push(['HTTP-код', resp.getResponseCode(), '', '', '', '']);
+    rows.push(['початок відповіді', String(text).slice(0, 300), '', '', '', '']);
+    let rate = null;
+    try {
+      rate = parseNbuRate(JSON.parse(text), 'USD');
+    } catch (e) {
+      rate = null;
+    }
+    rows.push(['розібраний курс USD', rate === null ? 'НЕ РОЗІБРАНО' : rate, '', '', '', '']);
+  } catch (e) {
+    rows.push(['виняток', errText_(e), '', '', '', '']);
+  }
+  discoverOut_(deps.store, 'checkFxRate ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
+  console.log('checkFxRate: результат у листі «Discover»');
+}
