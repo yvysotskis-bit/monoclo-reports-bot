@@ -316,3 +316,63 @@ function checkShopify() {
   discoverOut_(deps.store, 'checkShopify ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
   console.log('checkShopify: результат у листі «Discover»');
 }
+
+// Чисте: підсумок замовлень за день для діагностики.
+// Повертає {byStatus: [{key, orders, sum}], byChannel: [{key, orders}], total}
+function summarizeOrdersForDay(orders, date) {
+  const day = orders.filter(function (o) {
+    return o.date === date;
+  });
+  const st = {};
+  const ch = {};
+  day.forEach(function (o) {
+    const k = o.source_group + ' | статус ' + o.status_id + ' ' + (o.status_name || '') + ' | враховується: ' + (toBool(o.is_counted) ? 'так' : 'НІ');
+    st[k] = st[k] || { key: k, orders: 0, sum: 0 };
+    st[k].orders += 1;
+    st[k].sum += Number(o.grand_total) || 0;
+    if (toBool(o.is_counted)) {
+      const k2 = o.source_group + ' | канал ' + o.channel + ' | мітки: ' + o.utm_origin;
+      ch[k2] = ch[k2] || { key: k2, orders: 0 };
+      ch[k2].orders += 1;
+    }
+  });
+  function arr(o) {
+    return Object.keys(o)
+      .sort()
+      .map(function (k) {
+        return o[k];
+      });
+  }
+  return { byStatus: arr(st), byChannel: arr(ch), total: day.length };
+}
+
+// Діагностика дня: замовлення за джерелами/статусами/каналами + останні попередження з Лог (причини збоїв)
+function checkDay() {
+  const deps = defaultDeps();
+  const date = yesterday_(deps);
+  const orders = deps.store.read('KeyCRM_Orders');
+  const sum = summarizeOrdersForDay(orders, date);
+  const rows = [['день', date, 'усього замовлень у таблиці за день: ' + sum.total, '', '', '']];
+  sum.byStatus.forEach(function (r) {
+    rows.push(['джерело/статус', r.key, 'замовлень: ' + r.orders, 'сума: ' + Math.round(r.sum), '', '']);
+  });
+  sum.byChannel.forEach(function (r) {
+    rows.push(['канал/мітки', r.key, 'замовлень: ' + r.orders, '', '', '']);
+  });
+  const origins = {};
+  orders.forEach(function (o) {
+    origins[o.utm_origin] = (origins[o.utm_origin] || 0) + 1;
+  });
+  rows.push(['усього рядків KeyCRM_Orders', orders.length, 'за походженням міток: ' + JSON.stringify(origins), '', '', '']);
+  deps.store
+    .read('Лог')
+    .filter(function (r) {
+      return r.level === 'WARN' || r.level === 'ERROR';
+    })
+    .slice(-12)
+    .forEach(function (r) {
+      rows.push(['Лог ' + r.level, r.timestamp, String(r.message).slice(0, 400), '', '', '']);
+    });
+  discoverOut_(deps.store, 'checkDay ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
+  console.log('checkDay: результат у листі «Discover»');
+}

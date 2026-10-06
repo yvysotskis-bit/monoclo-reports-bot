@@ -514,6 +514,19 @@ function suiteShopify_(t) {
   });
 }
 
+function suiteDiag_(t) {
+  t.test('діагностика дня: підсумок за джерелом/статусом і каналом', function () {
+    const orders = fxOrders();
+    const r = summarizeOrdersForDay(orders, FX_DATE);
+    t.eq(r.total, 18);
+    const cancelled = r.byStatus.filter(function (x) { return x.key.indexOf('НІ') !== -1; });
+    t.eq(cancelled.length, 1);
+    t.eq(cancelled[0].orders, 1);
+    const metaAds = r.byChannel.filter(function (x) { return x.key.indexOf('site | канал meta_ads') === 0; });
+    t.eq(metaAds[0].orders, 7);
+  });
+}
+
 function suiteKeycrm_(t) {
   const settings = fxSettings({
     keycrm_source_site_ids: '5', keycrm_source_quickorders_ids: '6', keycrm_source_instagram_ids: '7',
@@ -573,5 +586,5 @@ function suiteKeycrm_(t) {
 }
 
 function getTestSuites_() {
-  return [suiteFormat_, suiteDates_, suiteActions_, suiteAttribution_, suiteMetrics_, suiteRules_, suiteTelegram_, suiteStorage_, suiteApis_, suiteMetaAccounts_, suiteFx_, suiteShopify_, suiteKeycrm_, suiteMsg1_, suiteFlow_];
+  return [suiteFormat_, suiteDates_, suiteActions_, suiteAttribution_, suiteMetrics_, suiteRules_, suiteTelegram_, suiteStorage_, suiteApis_, suiteMetaAccounts_, suiteFx_, suiteShopify_, suiteDiag_, suiteKeycrm_, suiteMsg1_, suiteFlow_];
 }
