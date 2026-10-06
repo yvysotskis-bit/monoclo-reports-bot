@@ -139,7 +139,12 @@ function buildDailyReportWith(deps, date, opts) {
   });
   const crmRows = deps.store.read('CRM_Daily');
   const def = getReportRegistry().meta;
-  const msgs = def.build({ date: date, settings: settings, metaRows: metaRows, crmRows: crmRows, crmAvailable: opts.crmAvailable !== false });
+  // Поки в «Налаштуваннях» не задано жодного ID джерела KeyCRM, усі замовлення були б "other" і дали б хибні нулі
+  const sourcesConfigured = ['site', 'quickorders', 'instagram'].some(function (g) {
+    return settingList(settings, 'keycrm_source_' + g + '_ids').length > 0;
+  });
+  if (!sourcesConfigured) deps.log('WARN', 'Не заповнено keycrm_source_*_ids у «Налаштуваннях» — блок CRM у звіті показано як недоступний');
+  const msgs = def.build({ date: date, settings: settings, metaRows: metaRows, crmRows: crmRows, crmAvailable: opts.crmAvailable !== false && sourcesConfigured });
   const rows = msgs.map(function (m) {
     return { date: date, report: def.id, message_no: m.message_no, text: m.text, status: 'ready', sent_at: '', tg_message_id: '', error: '' };
   });

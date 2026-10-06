@@ -169,6 +169,14 @@ function suiteFlow_(t) {
     t.eq(deps.calls.alerts.length, 1);
     t.ok(deps.calls.alerts[0].indexOf('KeyCRM') !== -1);
   });
+  t.test('ID джерел KeyCRM не задано: у звіті «дані KeyCRM недоступні» замість хибних нулів', function () {
+    const deps = makeMemDeps_({ settings: fxSettings({ keycrm_source_site_ids: '', keycrm_source_quickorders_ids: '', keycrm_source_instagram_ids: '' }) });
+    runDailyReportWith(deps, { send: false });
+    const text = deps.store.read('Звіт_Щодня')[0].text;
+    t.ok(text.indexOf('📥 ЗАМОВЛЕННЯ З META (KeyCRM)\nдані KeyCRM недоступні') !== -1);
+    t.ok(text.indexOf('ROAS 0,00×') === -1);
+    t.ok(deps.calls.logs.some(function (l) { return l.indexOf('keycrm_source_') !== -1; }));
+  });
   t.test('Meta недоступна: звіт НЕ надсилається, є алерт', function () {
     const deps = makeMemDeps_({ metaError: new Error('Meta API: HTTP 500') });
     const r = runDailyReportWith(deps, { send: true });
