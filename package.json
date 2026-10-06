@@ -1,0 +1,11 @@
+{
+  "name": "monoclo-reports-bot",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Звіти таргетолога Monoclo: Meta + KeyCRM -> Google Sheets -> Telegram (Google Apps Script)",
+  "scripts": {
+    "test": "node tests/run.js",
+    "push": "clasp push"
+  },
+  "engines": { "node": ">=18" }
+}
