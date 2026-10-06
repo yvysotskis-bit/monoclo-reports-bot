@@ -200,8 +200,13 @@ function mergeAccountDays(daysPerAccount) {
 // Рекламні акаунти можуть бути в USD, а замовлення KeyCRM — у гривнях. Без конвертації CPA і ROAS "за CRM"
 // були б неправильними в десятки разів, тому витрати й цінність покупок переводяться в UAH до запису в Meta_Daily.
 
-function nbuUrl(cc, ymd) {
-  return 'https://bank.gov.ua/NBUStatService/v1/statdirective/exchange?valcode=' + encodeURIComponent(cc) + '&date=' + ymd.replace(/-/g, '') + '&json'; // VERIFY: формат відповіді НБУ
+// Адреси НБУ (VERIFY: старий шлях /statdirective/exchange повертає 404). Пробуються по черзі.
+function nbuUrls(cc, ymd) {
+  const d = ymd.replace(/-/g, '');
+  return [
+    'https://bank.gov.ua/NBUStatService/v1/statdirective/exchangenew?json&valcode=' + encodeURIComponent(cc) + '&date=' + d,
+    'https://bank.gov.ua/NBU_Exchange/exchange_site?start=' + d + '&end=' + d + '&valcode=' + encodeURIComponent(String(cc).toLowerCase()) + '&sort=exchangedate&order=desc&json'
+  ];
 }
 
 // Відповідь НБУ -> курс (грн за 1 одиницю) або null
@@ -223,14 +228,17 @@ function fetchNbuRate_(cc, ymd, cache) {
     const key = cc + '|' + d;
     if (cache[key] === undefined) {
       let rate = null;
-      try {
-        const resp = UrlFetchApp.fetch(nbuUrl(cc, d), { muteHttpExceptions: true });
-        const code = resp.getResponseCode();
-        const text = resp.getContentText();
-        if (code === 200) rate = parseNbuRate(JSON.parse(text), cc);
-        if (!rate) lastInfo = 'HTTP ' + code + ': ' + String(text).slice(0, 120).replace(/\s+/g, ' ');
-      } catch (e) {
-        lastInfo = 'виняток: ' + String(e && e.message ? e.message : e).slice(0, 160);
+      const urls = nbuUrls(cc, d);
+      for (let u = 0; u < urls.length && !rate; u++) {
+        try {
+          const resp = UrlFetchApp.fetch(urls[u], { muteHttpExceptions: true });
+          const code = resp.getResponseCode();
+          const text = resp.getContentText();
+          if (code === 200) rate = parseNbuRate(JSON.parse(text), cc);
+          if (!rate) lastInfo = 'HTTP ' + code + ': ' + String(text).slice(0, 120).replace(/\s+/g, ' ');
+        } catch (e) {
+          lastInfo = 'виняток: ' + String(e && e.message ? e.message : e).slice(0, 160);
+        }
       }
       cache[key] = rate;
     }

@@ -221,27 +221,29 @@ function discoverKeycrm() {
   console.log('discoverKeycrm: результат у листі «Discover»');
 }
 
-// Діагностика курсу НБУ: що саме повертає bank.gov.ua при запиті з Apps Script
+// Діагностика курсу НБУ: що саме повертає bank.gov.ua при запиті з Apps Script (усі адреси з nbuUrls)
 function checkFxRate() {
   const deps = defaultDeps();
   const ymd = yesterday_(deps);
-  const url = nbuUrl('USD', ymd);
-  const rows = [['запит', url, '', '', '', '']];
-  try {
-    const resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
-    const text = resp.getContentText();
-    rows.push(['HTTP-код', resp.getResponseCode(), '', '', '', '']);
-    rows.push(['початок відповіді', String(text).slice(0, 300), '', '', '', '']);
-    let rate = null;
+  const rows = [];
+  nbuUrls('USD', ymd).forEach(function (url, i) {
+    rows.push(['запит ' + (i + 1), url, '', '', '', '']);
     try {
-      rate = parseNbuRate(JSON.parse(text), 'USD');
+      const resp = UrlFetchApp.fetch(url, { muteHttpExceptions: true });
+      const text = resp.getContentText();
+      rows.push(['  HTTP-код', resp.getResponseCode(), '', '', '', '']);
+      rows.push(['  початок відповіді', String(text).slice(0, 300), '', '', '', '']);
+      let rate = null;
+      try {
+        rate = parseNbuRate(JSON.parse(text), 'USD');
+      } catch (e) {
+        rate = null;
+      }
+      rows.push(['  розібраний курс USD', rate === null ? 'НЕ РОЗІБРАНО' : rate, '', '', '', '']);
     } catch (e) {
-      rate = null;
+      rows.push(['  виняток', errText_(e), '', '', '', '']);
     }
-    rows.push(['розібраний курс USD', rate === null ? 'НЕ РОЗІБРАНО' : rate, '', '', '', '']);
-  } catch (e) {
-    rows.push(['виняток', errText_(e), '', '', '', '']);
-  }
+  });
   discoverOut_(deps.store, 'checkFxRate ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
   console.log('checkFxRate: результат у листі «Discover»');
 }
