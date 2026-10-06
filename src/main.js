@@ -102,7 +102,7 @@ function collectData(deps, from, to) {
         return Object.assign({}, d, { updated_at: stamp });
       })
     );
-    deps.log('INFO', 'Meta: оновлено ' + m.days.length + ' дн. (' + from + '…' + to + '). Direct-кампанії: ' + (m.directCampaigns.join(', ') || 'немає'));
+    deps.log('INFO', 'Meta: оновлено ' + m.days.length + ' дн. (' + from + '…' + to + '). Валюти акаунтів: ' + JSON.stringify(m.currencies || {}) + '. Direct-кампанії з витратами: ' + (m.directCampaigns.join(', ') || 'немає'));
     res.metaOk = true;
   } catch (e) {
     deps.log('ERROR', 'Meta: ' + errText_(e));

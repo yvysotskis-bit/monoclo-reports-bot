@@ -433,6 +433,31 @@ function suiteMetaAccounts_(t) {
   });
 }
 
+function suiteFx_(t) {
+  t.test('курс НБУ: розбір відповіді', function () {
+    t.near(parseNbuRate([{ r030: 840, txt: 'Долар США', rate: 41.25, cc: 'USD', exchangedate: '05.10.2026' }], 'USD'), 41.25);
+    t.eq(parseNbuRate([], 'USD'), null);
+    t.eq(parseNbuRate([{ cc: 'EUR', rate: 45 }], 'USD'), null);
+    t.eq(parseNbuRate({ error: 1 }, 'USD'), null);
+  });
+  t.test('конвертація в UAH: витрати, цінність покупок і direct_spend; покази/події не змінюються', function () {
+    const days = [{ date: 'd1', spend: 10, purchase_value: 30, direct_spend: 4, impressions: 1000, purchases: 2, reach: 900 }];
+    const r = convertDaysToUah(days, { d1: 41.5 });
+    t.near(r[0].spend, 415);
+    t.near(r[0].purchase_value, 1245);
+    t.near(r[0].direct_spend, 166);
+    t.eq(r[0].impressions, 1000);
+    t.eq(r[0].purchases, 2);
+    t.eq(days[0].spend, 10); // вхід не змінено
+    t.throws(function () { convertDaysToUah(days, {}); });
+  });
+  t.test('курси: UAH = 1, fixed із налаштувань, fixed без значення — помилка', function () {
+    t.eq(getFxRates_('UAH', ['d1', 'd2'], fxSettings(), {}), { d1: 1, d2: 1 });
+    t.eq(getFxRates_('USD', ['d1'], fxSettings({ meta_fx_mode: 'fixed', meta_fx_fixed_rate: '41,5' }), {}), { d1: 41.5 });
+    t.throws(function () { getFxRates_('USD', ['d1'], fxSettings({ meta_fx_mode: 'fixed', meta_fx_fixed_rate: '' }), {}); });
+  });
+}
+
 function suiteKeycrm_(t) {
   const settings = fxSettings({
     keycrm_source_site_ids: '5', keycrm_source_quickorders_ids: '6', keycrm_source_instagram_ids: '7',
@@ -492,5 +517,5 @@ function suiteKeycrm_(t) {
 }
 
 function getTestSuites_() {
-  return [suiteFormat_, suiteDates_, suiteActions_, suiteAttribution_, suiteMetrics_, suiteRules_, suiteTelegram_, suiteStorage_, suiteApis_, suiteMetaAccounts_, suiteKeycrm_, suiteMsg1_, suiteFlow_];
+  return [suiteFormat_, suiteDates_, suiteActions_, suiteAttribution_, suiteMetrics_, suiteRules_, suiteTelegram_, suiteStorage_, suiteApis_, suiteMetaAccounts_, suiteFx_, suiteKeycrm_, suiteMsg1_, suiteFlow_];
 }

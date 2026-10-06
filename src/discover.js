@@ -71,7 +71,7 @@ function utmFrequency(rawOrders) {
 }
 
 function discoverOut_(store, label, rows) {
-  const out = [{ section: '=== ' + label, a: '', b: '', c: '', d: '', e: '', f: '' }].concat(
+  const out = [{ section: '▶ ' + label, a: '', b: '', c: '', d: '', e: '', f: '' }].concat(
     rows.map(function (r) {
       return { section: label, a: r[0], b: r[1], c: r[2], d: r[3], e: r[4], f: r[5] };
     })
@@ -119,6 +119,23 @@ function discoverActions() {
   const direct = detectDirectCampaigns(adsets, settingList(deps.getSettings(), 'direct_campaign_ids'));
   sheetRows.push(['Direct-кампанії', direct.join(', ') || '(немає)', '', '', '', '']);
   sheetRows.push(['акаунти Meta', getMetaAccountIds().join(', '), '', '', '', '']);
+  const fxCache = {};
+  getMetaAccountIds().forEach(function (id) {
+    try {
+      const cur = fetchAccountCurrency_(id);
+      let rate = 'курс не потрібен';
+      if (String(cur).toUpperCase() !== 'UAH') {
+        try {
+          rate = String(getFxRates_(cur, [to], deps.getSettings(), fxCache)[to]);
+        } catch (e) {
+          rate = 'помилка курсу: ' + errText_(e);
+        }
+      }
+      sheetRows.push(['валюта акаунта', id, cur, 'курс на ' + to + ': ' + rate, '', '']);
+    } catch (e) {
+      sheetRows.push(['валюта акаунта', id, 'помилка: ' + errText_(e), '', '', '']);
+    }
+  });
 
   discoverOut_(deps.store, 'discoverActions ' + stamp + ' (' + from + '…' + to + ')', sheetRows);
   sheetRows.forEach(function (r) {

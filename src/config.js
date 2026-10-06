@@ -21,6 +21,8 @@ const DEFAULT_SETTINGS = [
   ['pixel_crm_diff_yellow_pct', 20, 'розбіжність піксель vs CRM: від цього % — 🟡'],
   ['pixel_crm_diff_red_pct', 40, 'розбіжність піксель vs CRM: від цього % — 🔴'],
   ['utm_missing_warn_pct', 30, 'частка замовлень сайту без UTM: від цього % — 🟡'],
+  ['meta_fx_mode', 'nbu', 'рахунки Meta не в UAH: nbu = офіційний курс НБУ на кожну дату; fixed = фіксований курс нижче'],
+  ['meta_fx_fixed_rate', '', 'грн за 1 одиницю валюти рахунку (лише якщо meta_fx_mode = fixed)'],
   // додаткові (не з ТЗ) — технічні, потрібні через те, що документація API не звірена:
   ['keycrm_order_include', 'marketing', 'VERIFY: значення параметра include для /order (де лежать UTM)'],
   ['keycrm_naive_timestamp_tz', 'UTC', 'VERIFY: часова зона для дат KeyCRM без зсуву (UTC або Europe/Kyiv)']

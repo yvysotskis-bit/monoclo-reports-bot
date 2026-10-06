@@ -196,20 +196,119 @@ function mergeAccountDays(daysPerAccount) {
   });
 }
 
-// Один акаунт: {days, directCampaigns}
-function fetchMetaAccountDays_(accountId, from, to, settings) {
+// ---- валюта рахунку -> UAH ----
+// Рекламні акаунти можуть бути в USD, а замовлення KeyCRM — у гривнях. Без конвертації CPA і ROAS "за CRM"
+// були б неправильними в десятки разів, тому витрати й цінність покупок переводяться в UAH до запису в Meta_Daily.
+
+function nbuUrl(cc, ymd) {
+  return 'https://bank.gov.ua/NBUStatService/v1/statdirective/exchange?valcode=' + encodeURIComponent(cc) + '&date=' + ymd.replace(/-/g, '') + '&json'; // VERIFY: формат відповіді НБУ
+}
+
+// Відповідь НБУ -> курс (грн за 1 одиницю) або null
+function parseNbuRate(body, cc) {
+  if (!Array.isArray(body)) return null;
+  for (let i = 0; i < body.length; i++) {
+    const r = body[i];
+    if (String(r.cc).toUpperCase() === String(cc).toUpperCase() && Number(r.rate) > 0) return Number(r.rate);
+  }
+  return null;
+}
+
+// Курс НБУ на дату; якщо на дату даних немає (вихідні/свята) — найближча попередня (до 7 днів назад)
+function fetchNbuRate_(cc, ymd, cache) {
+  for (let back = 0; back <= 7; back++) {
+    const d = addDays(ymd, -back);
+    const key = cc + '|' + d;
+    if (cache[key] === undefined) {
+      let rate = null;
+      try {
+        const resp = UrlFetchApp.fetch(nbuUrl(cc, d), { muteHttpExceptions: true });
+        if (resp.getResponseCode() === 200) rate = parseNbuRate(JSON.parse(resp.getContentText()), cc);
+      } catch (e) {
+        rate = null;
+      }
+      cache[key] = rate;
+    }
+    if (cache[key]) return cache[key];
+  }
+  throw new Error('Не вдалося отримати курс НБУ для ' + cc + ' на ' + ymd);
+}
+
+// {date: курс} для днів у валюті currency
+function getFxRates_(currency, dates, settings, cache) {
+  const out = {};
+  if (String(currency).toUpperCase() === 'UAH') {
+    dates.forEach(function (d) {
+      out[d] = 1;
+    });
+    return out;
+  }
+  if (String(settings.meta_fx_mode).trim().toLowerCase() === 'fixed') {
+    const fixed = settingNumOrNull(settings, 'meta_fx_fixed_rate');
+    if (!(fixed > 0)) throw new Error('meta_fx_mode = fixed, але meta_fx_fixed_rate не заповнено');
+    dates.forEach(function (d) {
+      out[d] = fixed;
+    });
+    return out;
+  }
+  dates.forEach(function (d) {
+    out[d] = fetchNbuRate_(currency, d, cache);
+  });
+  return out;
+}
+
+// Чисте: переводить грошові поля днів у UAH за курсами по датах. reach/покази/події не змінюються.
+function convertDaysToUah(days, ratesByDate) {
+  return days.map(function (d) {
+    const k = ratesByDate[d.date];
+    if (!(k > 0)) throw new Error('Немає курсу для ' + d.date);
+    return Object.assign({}, d, {
+      spend: Math.round(d.spend * k * 100) / 100,
+      purchase_value: Math.round(d.purchase_value * k * 100) / 100,
+      direct_spend: Math.round(d.direct_spend * k * 100) / 100
+    });
+  });
+}
+
+function fetchAccountCurrency_(accountId) {
+  const body = metaFetchJson_(metaBase_() + '/' + accountId + '?fields=currency'); // VERIFY: поле currency рекламного акаунта
+  if (!body || !body.currency) throw new Error('Meta: не вдалося визначити валюту акаунта ' + accountId);
+  return body.currency;
+}
+
+// Один акаунт: {days (у UAH), directCampaigns (з витратами за період), currency}
+function fetchMetaAccountDays_(accountId, from, to, settings, fxCache) {
   const accountRows = fetchInsights({ accountId: accountId, level: 'account', since: from, until: to, fields: META_ACCOUNT_FIELDS });
   const campaignRows = fetchInsights({ accountId: accountId, level: 'campaign', since: from, until: to, fields: META_CAMPAIGN_FIELDS });
   const override = settingList(settings, 'direct_campaign_ids');
   const directIds = detectDirectCampaigns(override.length ? [] : fetchAdsets_(accountId), override);
-  return { days: assembleMetaDays(accountRows, campaignRows, directIds, from, to), directCampaigns: directIds };
+  const currency = fetchAccountCurrency_(accountId);
+  const days = assembleMetaDays(accountRows, campaignRows, directIds, from, to);
+  const rates = getFxRates_(currency, dateRange(from, to), settings, fxCache);
+  const active = {};
+  campaignRows.forEach(function (r) {
+    if ((Number(r.spend) || 0) > 0) active[String(r.campaign_id)] = true;
+  });
+  return {
+    days: convertDaysToUah(days, rates),
+    // у Лог — лише Direct-кампанії, що мали витрати за період (повний список може бути сотнями архівних)
+    directCampaigns: directIds.filter(function (id) {
+      return active[id];
+    }),
+    currency: currency
+  };
 }
 
-// Усе, що потрібно щоденному звіту за [from, to], сума по всіх акаунтах: {days, directCampaigns}
+// Усе, що потрібно щоденному звіту за [from, to], сума по всіх акаунтах (у UAH):
+// {days, directCampaigns, currencies: {акаунт: валюта}}
 function fetchMetaDays(from, to, settings) {
+  const fxCache = {};
+  const currencies = {};
   const per = getMetaAccountIds().map(function (id) {
     try {
-      return fetchMetaAccountDays_(id, from, to, settings);
+      const r = fetchMetaAccountDays_(id, from, to, settings, fxCache);
+      currencies[id] = r.currency;
+      return r;
     } catch (e) {
       e.message = '[' + id + '] ' + e.message; // нехай алерт покаже, який акаунт підвів
       throw e;
@@ -227,6 +326,7 @@ function fetchMetaDays(from, to, settings) {
         return p.days;
       })
     ),
-    directCampaigns: direct
+    directCampaigns: direct,
+    currencies: currencies
   };
 }
