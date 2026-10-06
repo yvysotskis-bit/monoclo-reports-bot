@@ -204,6 +204,21 @@ function discoverKeycrm() {
       });
   });
 
+  // зв'язок із зовнішньою системою (Shopify): ідентифікатори, що не є персональними даними
+  const linkSources = settingList(settings, 'keycrm_source_site_ids').concat(settingList(settings, 'keycrm_source_quickorders_ids'));
+  linkSources.forEach(function (sid) {
+    (bySource[sid] || []).slice(0, 5).forEach(function (o) {
+      out.push([
+        "зв'язок з Shopify, джерело " + sid,
+        'id=' + o.id,
+        'source_uuid=' + o.source_uuid,
+        'global_source_uuid=' + o.global_source_uuid,
+        'status_on_source=' + o.status_on_source,
+        'ordered_at=' + o.ordered_at
+      ]);
+    });
+  });
+
   // частка замовлень з UTM за джерелами + висновок про Shopify (4.7)
   const share = utmShareBySource(raw);
   Object.keys(share).forEach(function (sid) {
