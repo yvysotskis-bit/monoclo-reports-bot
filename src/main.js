@@ -93,6 +93,10 @@ function collectData(deps, from, to) {
   const rules = deps.getRules();
   const stamp = dateTimeInTz(deps.now(), KYIV_TZ);
   const res = { metaOk: false, crmOk: false };
+  const sec = function (t0) {
+    return Math.round((deps.now().getTime() - t0) / 1000) + ' с';
+  };
+  let t0 = deps.now().getTime();
 
   try {
     const m = deps.fetchMeta(from, to, settings);
@@ -103,6 +107,7 @@ function collectData(deps, from, to) {
         return Object.assign({}, d, { updated_at: stamp });
       })
     );
+    deps.log('INFO', 'Meta: етап тривав ' + sec(t0));
     deps.log('INFO', 'Meta: оновлено ' + m.days.length + ' дн. (' + from + '…' + to + '). Валюти акаунтів: ' + JSON.stringify(m.currencies || {}) + '. Direct-кампанії з витратами: ' + (m.directCampaigns.join(', ') || 'немає'));
     if (m.fxFallback) deps.log('WARN', 'Курс НБУ недоступний — використано фіксований курс з налаштувань (meta_fx_fixed_rate)');
     res.metaOk = true;
@@ -111,6 +116,8 @@ function collectData(deps, from, to) {
     alertSafe_(deps, e && e.isTokenError ? '🚨 Токен Meta недійсний — потрібно оновити META_ACCESS_TOKEN' : '🚨 Дані Meta недоступні, звіт не надіслано: ' + errText_(e));
   }
 
+  t0 = deps.now().getTime();
+  deps.log('INFO', 'KeyCRM: завантаження замовлень…');
   try {
     const existing = {};
     deps.store.read('KeyCRM_Orders').forEach(function (r) {
@@ -129,6 +136,7 @@ function collectData(deps, from, to) {
       })
     );
     rebuildCrmDaily_(deps.store, dateRange(from, to));
+    deps.log('INFO', 'KeyCRM (разом із Shopify та записом у таблицю): етап тривав ' + sec(t0));
     deps.log('INFO', 'KeyCRM: оновлено ' + orders.length + ' замовл. (' + from + '…' + to + ')');
     warnUnknownSources_(deps, orders);
     res.crmOk = true;
@@ -205,6 +213,16 @@ function sendReportFromSheetWith(deps, date, opts) {
 }
 
 function runDailyReportWith(deps, opts) {
+  try {
+    return runDailyReportInner_(deps, opts);
+  } catch (e) {
+    deps.log('ERROR', 'runDailyReport: непередбачений збій: ' + errText_(e) + (e && e.stack ? ' | ' + redactSecrets_(String(e.stack)).slice(0, 300) : ''));
+    alertSafe_(deps, '🚨 Збій щоденного запуску: ' + errText_(e));
+    throw e;
+  }
+}
+
+function runDailyReportInner_(deps, opts) {
   const date = yesterday_(deps);
   deps.log('INFO', 'Запуск звіту за ' + date + (opts.send ? '' : ' (dryRun, без відправки)'));
   const res = collectData(deps, addDays(date, -7), date);
