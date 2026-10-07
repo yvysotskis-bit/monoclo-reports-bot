@@ -7,6 +7,7 @@ const TRIGGERS = [{ handler: 'runDailyReport', hour: 9, minute: 0 }];
 const LOG_MAX_ROWS = 5000;
 
 function defaultDeps() {
+  RUN_START_MS = Date.now();
   const store = sheetStore();
   const now = function () {
     return new Date();

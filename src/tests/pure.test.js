@@ -514,6 +514,89 @@ function suiteShopify_(t) {
   });
 }
 
+function suiteSpeed_(t) {
+  t.test('Direct-кампанії: відомі беруться з кешу, запит лише для нових; результат запам\u2019ятовується', function () {
+    const cache = { yes: { '1': true }, no: { '2': true } };
+    const asked = [];
+    const direct = resolveDirectCampaigns(['1', '2', '3', '4'], cache, function (id) {
+      asked.push(id);
+      return id === '3' ? [{ destination_type: 'INSTAGRAM_DIRECT' }] : [{ destination_type: 'WEBSITE' }];
+    });
+    t.eq(direct, ['1', '3']);
+    t.eq(asked, ['3', '4']); // 1 і 2 не запитувались
+    t.eq(cache.yes['3'], true);
+    t.eq(cache.no['4'], true);
+    resolveDirectCampaigns(['3', '4'], cache, function () { throw new Error('не мало запитуватись'); });
+    t.eq(isDirectAdsets([{ destination_type: 'MESSENGER' }]), true);
+    t.eq(isDirectAdsets([]), false);
+  });
+  t.test('Shopify-резерв: кеш (shopify, shopify_none старші за 2 доби) не запитується повторно; QuickOrders пропускаються', function () {
+    const settings = fxSettings({ keycrm_source_site_ids: '212', keycrm_source_quickorders_ids: '216', shopify_max_lookups_per_run: 80 });
+    const raws = [
+      { id: 1, source_id: 212, source_uuid: 'M-CL1', marketing: null },
+      { id: 2, source_id: 212, source_uuid: 'M-CL2', marketing: null },
+      { id: 3, source_id: 212, source_uuid: 'M-CL3', marketing: null },
+      { id: 4, source_id: 212, source_uuid: 'M-CL4', marketing: null },
+      { id: 5, source_id: 216, source_uuid: 'quick-20261006-1', marketing: null }
+    ];
+    const existing = {
+      '1': { utm_origin: 'shopify', date: '2026-10-01', utm_source: 'ig', utm_medium: 'paid' },
+      '2': { utm_origin: 'shopify_none', date: '2026-10-01' }, // старе, перевірене
+      '3': { utm_origin: 'shopify_none', date: '2026-10-06' } // свіже — перевіряємо ще раз
+    };
+    const orig = fetchShopifyJourneys;
+    const calls = [];
+    fetchShopifyJourneys = function (keys) {
+      calls.push(keys);
+      const out = {};
+      keys.forEach(function (k) {
+        out[k] = k === 'name:M-CL3' ? { lastVisit: { utmParameters: { source: 'facebook', medium: 'cpc' } } } : null;
+      });
+      return out;
+    };
+    let fb;
+    try {
+      fb = buildShopifyFallback_(raws, settings, existing, '2026-10-07');
+    } finally {
+      fetchShopifyJourneys = orig;
+    }
+    t.eq(calls, [['name:M-CL4', 'name:M-CL3']]); // найновіші першими; 1, 2 і QuickOrders не запитувались
+    t.eq(fb(raws[0]).utm_source, 'ig'); // з кешу
+    t.eq(fb(raws[1]), {}); // перевірено, міток немає
+    t.eq(fb(raws[2]).utm_source, 'facebook');
+    t.eq(fb(raws[3]), {}); // нове, у Shopify міток немає
+    t.eq(fb(raws[4]), null); // QuickOrders — не застосовується
+  });
+  t.test('Shopify-резерв: ліміт пошуків за запуск; решта лишається неперевіреною (null)', function () {
+    const settings = fxSettings({ keycrm_source_site_ids: '212', shopify_max_lookups_per_run: 10 });
+    const raws = [];
+    for (let i = 101; i <= 125; i++) raws.push({ id: i, source_id: 212, source_uuid: 'M-CL' + i, marketing: null });
+    const orig = fetchShopifyJourneys;
+    const calls = [];
+    fetchShopifyJourneys = function (keys) {
+      calls.push(keys.length);
+      return {};
+    };
+    let fb;
+    try {
+      fb = buildShopifyFallback_(raws, settings, {}, '2026-10-07');
+    } finally {
+      fetchShopifyJourneys = orig;
+    }
+    t.eq(calls, [10]);
+    t.eq(fb(raws[24]), {}); // id 125 — найновіше, опрацьовано
+    t.eq(fb(raws[0]), null); // id 101 — не дійшло
+  });
+  t.test('нормалізація: перевірено в Shopify без міток -> utm_origin = shopify_none', function () {
+    const o = normalizeOrder(
+      { id: 21, created_at: '2026-10-05T10:00:00.000000Z', source_id: 212, status_id: 1, grand_total: 100, marketing: null },
+      { settings: fxSettings({ keycrm_source_site_ids: '212' }), rules: parseRuleRows(DEFAULT_UTM_RULES), statusNames: {}, utmFallback: function () { return {}; } }
+    );
+    t.eq(o.utm_origin, 'shopify_none');
+    t.eq(o.channel, 'no_utm');
+  });
+}
+
 function suiteDiag_(t) {
   t.test('діагностика дня: підсумок за джерелом/статусом і каналом', function () {
     const orders = fxOrders();
@@ -594,5 +677,5 @@ function suiteKeycrm_(t) {
 }
 
 function getTestSuites_() {
-  return [suiteFormat_, suiteDates_, suiteActions_, suiteAttribution_, suiteMetrics_, suiteRules_, suiteTelegram_, suiteStorage_, suiteApis_, suiteMetaAccounts_, suiteFx_, suiteShopify_, suiteDiag_, suiteKeycrm_, suiteMsg1_, suiteFlow_];
+  return [suiteFormat_, suiteDates_, suiteActions_, suiteAttribution_, suiteMetrics_, suiteRules_, suiteTelegram_, suiteStorage_, suiteApis_, suiteMetaAccounts_, suiteFx_, suiteShopify_, suiteSpeed_, suiteDiag_, suiteKeycrm_, suiteMsg1_, suiteFlow_];
 }

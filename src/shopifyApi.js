@@ -202,11 +202,19 @@ function fetchShopifyJourneys(keys) {
   return out;
 }
 
-// Функція-резерв для normalizeOrder: raw замовлення KeyCRM -> UTM із Shopify (або null).
-// existing: {order_id: рядок KeyCRM_Orders} — вже знайдені мітки з Shopify не запитуються повторно.
-function buildShopifyFallback_(raws, settings, existing) {
+// Функція-резерв для normalizeOrder: raw замовлення KeyCRM -> UTM із Shopify:
+//  - об'єкт з мітками — знайдено; {} — перевірено, міток немає; null — не застосовується / ще не перевірено.
+// existing: {order_id: рядок KeyCRM_Orders}. Не питаємо Shopify повторно про:
+//  - замовлення, де мітки вже знайдено (utm_origin = shopify);
+//  - перевірені й порожні замовлення старші за 2 доби (utm_origin = shopify_none).
+// Щоб не впертись у ліміт часу Apps Script, за один запуск робиться не більше shopify_max_lookups_per_run
+// пошуків і не довше SHOPIFY_TIME_BUDGET_MS від початку запуску; найновіші замовлення — першими.
+const SHOPIFY_TIME_BUDGET_MS = 240000;
+
+function buildShopifyFallback_(raws, settings, existing, today) {
   const found = {};
   const need = [];
+  const staleBefore = addDays(today, -2);
   raws.forEach(function (raw) {
     const group = classifySource(pickPath(raw, KEYCRM_FIELDS.sourceId), settings);
     if (group !== 'site' && group !== 'quickorders') return;
@@ -220,20 +228,34 @@ function buildShopifyFallback_(raws, settings, existing) {
       };
       return;
     }
+    if (ex && ex.utm_origin === 'shopify_none' && String(ex.date) <= staleBefore) {
+      found[id] = {};
+      return;
+    }
     const key = shopifyLookupKey(raw);
     if (key) need.push({ id: id, key: key });
   });
-  if (need.length) {
+  need.sort(function (a, b) {
+    return Number(b.id) - Number(a.id);
+  });
+  const maxLookups = settingNumOrNull(settings, 'shopify_max_lookups_per_run') || 80;
+  let done = 0;
+  for (let i = 0; i < need.length; i += SHOPIFY_NAME_BATCH) {
+    if (done >= maxLookups) break;
+    if (RUN_START_MS && Date.now() - RUN_START_MS > SHOPIFY_TIME_BUDGET_MS) break;
+    const chunk = need.slice(i, i + SHOPIFY_NAME_BATCH);
     const journeys = fetchShopifyJourneys(
-      need.map(function (n) {
+      chunk.map(function (n) {
         return n.key;
       })
     );
-    need.forEach(function (n) {
-      found[n.id] = journeyToUtm(journeys[n.key]);
+    chunk.forEach(function (n) {
+      found[n.id] = journeyToUtm(journeys[n.key]) || {};
     });
+    done += chunk.length;
   }
   return function (raw) {
-    return found[String(pickPath(raw, KEYCRM_FIELDS.id))] || null;
+    const v = found[String(pickPath(raw, KEYCRM_FIELDS.id))];
+    return v === undefined ? null : v;
   };
 }

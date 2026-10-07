@@ -61,7 +61,7 @@ function normalizeOrder(raw, ctx) {
       Object.keys(fb).forEach(function (k) {
         utm[k] = String(fb[k] == null ? '' : fb[k]);
       });
-      origin = hasAnyUtm(utm) ? 'shopify' : 'none';
+      origin = hasAnyUtm(utm) ? 'shopify' : 'shopify_none'; // 'shopify_none' = перевірено в Shopify, міток немає
     }
   }
 
@@ -174,7 +174,7 @@ function fetchKeycrmOrders(from, to, settings, rules, existing) {
   let shopifyError = '';
   if (settingBool(settings, 'shopify_utm_fallback')) {
     try {
-      fallback = buildShopifyFallback_(raws, settings, existing || {});
+      fallback = buildShopifyFallback_(raws, settings, existing || {}, dateInTz(new Date(), KYIV_TZ));
     } catch (e) {
       shopifyError = redactSecrets_(e && e.message ? e.message : String(e));
     }

@@ -25,6 +25,7 @@ const DEFAULT_SETTINGS = [
   ['meta_fx_mode', 'nbu', 'рахунки Meta не в UAH: nbu = офіційний курс НБУ на кожну дату; fixed = фіксований курс нижче'],
   ['meta_fx_fixed_rate', '', 'грн за 1 одиницю валюти рахунку (лише якщо meta_fx_mode = fixed)'],
   ['shopify_utm_fallback', false, 'брати UTM із Shopify, якщо їх немає в KeyCRM (вмикати після успішного checkShopify)'],
+  ['shopify_max_lookups_per_run', 80, 'не більше стількох пошуків у Shopify за один запуск (захист від ліміту часу Apps Script)'],
   // додаткові (не з ТЗ) — технічні, потрібні через те, що документація API не звірена:
   ['keycrm_order_include', 'marketing', 'VERIFY: значення параметра include для /order (де лежать UTM)'],
   ['keycrm_naive_timestamp_tz', 'UTC', 'VERIFY: часова зона для дат KeyCRM без зсуву (UTC або Europe/Kyiv)']
@@ -104,6 +105,8 @@ function requireSecret(name) {
 const SECRET_NAMES = ['META_ACCESS_TOKEN', 'TG_BOT_TOKEN', 'KEYCRM_API_KEY', 'SHOPIFY_ADMIN_TOKEN', 'SHOPIFY_CLIENT_SECRET'];
 // Токени, отримані під час виконання (напр. Shopify client credentials), теж не повинні потрапляти в логи
 const EXTRA_SECRETS = [];
+// Початок поточного запуску (мс); ставиться у defaultDeps() — для бюджету часу довгих етапів
+let RUN_START_MS = 0;
 
 function secretValues_() {
   return SECRET_NAMES.map(getSecret).concat(EXTRA_SECRETS).filter(function (v) {

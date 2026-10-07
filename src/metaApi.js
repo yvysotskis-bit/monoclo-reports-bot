@@ -92,7 +92,7 @@ function fetchInsights(opts) {
 }
 
 const META_ACCOUNT_FIELDS = 'spend,impressions,reach,inline_link_clicks,actions,action_values';
-const META_CAMPAIGN_FIELDS = 'campaign_id,campaign_name,spend,actions';
+const META_CAMPAIGN_FIELDS = 'campaign_id,spend'; // actions і назва не потрібні — швидший запит
 
 // ---- чисті допоміжні ----
 
@@ -106,6 +106,56 @@ function detectDirectCampaigns(adsets, overrideIds) {
     if (a.destination_type && DIRECT_DESTINATION_RE.test(a.destination_type)) set[String(a.campaign_id)] = true;
   });
   return Object.keys(set);
+}
+
+
+// Чисте: чи є серед адсетів кампанії Direct-адсети
+function isDirectAdsets(adsets) {
+  return (adsets || []).some(function (a) {
+    return a.destination_type && DIRECT_DESTINATION_RE.test(a.destination_type);
+  });
+}
+
+// Чисте: які з АКТИВНИХ кампаній (були витрати за період) є Direct.
+// cache = {yes: {id: true}, no: {id: true}} доповнюється; для відомих кампаній запитів до Meta немає.
+function resolveDirectCampaigns(activeIds, cache, fetchAdsets) {
+  const out = [];
+  activeIds.forEach(function (raw) {
+    const id = String(raw);
+    if (cache.yes[id]) {
+      out.push(id);
+      return;
+    }
+    if (cache.no[id]) return;
+    const direct = isDirectAdsets(fetchAdsets(id));
+    (direct ? cache.yes : cache.no)[id] = true;
+    if (direct) out.push(id);
+  });
+  return out;
+}
+
+function loadDirectCache_() {
+  const p = PropertiesService.getScriptProperties();
+  function toSet(str) {
+    const o = {};
+    String(str || '').split(',').forEach(function (x) {
+      if (x) o[x] = true;
+    });
+    return o;
+  }
+  return { yes: toSet(p.getProperty('direct_cache_yes')), no: toSet(p.getProperty('direct_cache_no')) };
+}
+
+// Властивість скрипта обмежена ~9 КБ: зберігаємо до 400 останніх ID в кожному списку
+function saveDirectCache_(cache) {
+  function pack(o) {
+    return Object.keys(o).slice(-400).join(',');
+  }
+  PropertiesService.getScriptProperties().setProperties({ direct_cache_yes: pack(cache.yes), direct_cache_no: pack(cache.no) });
+}
+
+function fetchCampaignAdsets_(campaignId) {
+  return metaGetAll('/' + campaignId + '/adsets', { fields: 'destination_type', limit: 100 });
 }
 
 // Рядки campaign-рівня -> {date: сума spend Direct-кампаній}
@@ -205,8 +255,8 @@ function mergeAccountDays(daysPerAccount) {
 function nbuUrls(cc, ymd) {
   const d = ymd.replace(/-/g, '');
   return [
-    'https://bank.gov.ua/NBUStatService/v1/statdirective/exchangenew?json&valcode=' + encodeURIComponent(cc) + '&date=' + d,
-    'https://bank.gov.ua/NBU_Exchange/exchange_site?start=' + d + '&end=' + d + '&valcode=' + encodeURIComponent(String(cc).toLowerCase()) + '&sort=exchangedate&order=desc&json'
+    'https://bank.gov.ua/NBU_Exchange/exchange_site?start=' + d + '&end=' + d + '&valcode=' + encodeURIComponent(String(cc).toLowerCase()) + '&sort=exchangedate&order=desc&json', // працює (перевірено)
+    'https://bank.gov.ua/NBUStatService/v1/statdirective/exchangenew?json&valcode=' + encodeURIComponent(cc) + '&date=' + d // 404 під час перевірки; лишено як запасну
   ];
 }
 
@@ -302,11 +352,21 @@ function fetchAccountCurrency_(accountId) {
 }
 
 // Один акаунт: {days (у UAH), directCampaigns (з витратами за період), currency}
-function fetchMetaAccountDays_(accountId, from, to, settings, fxCache) {
+function fetchMetaAccountDays_(accountId, from, to, settings, fxCache, dirCache) {
   const accountRows = fetchInsights({ accountId: accountId, level: 'account', since: from, until: to, fields: META_ACCOUNT_FIELDS });
   const campaignRows = fetchInsights({ accountId: accountId, level: 'campaign', since: from, until: to, fields: META_CAMPAIGN_FIELDS });
   const override = settingList(settings, 'direct_campaign_ids');
-  const directIds = detectDirectCampaigns(override.length ? [] : fetchAdsets_(accountId), override);
+  let directIds;
+  if (override.length) {
+    directIds = override.map(String);
+  } else {
+    // Лише кампанії з витратами за період; відомі беруться з кешу, для нових — один запит на кампанію
+    const activeMap = {};
+    campaignRows.forEach(function (r) {
+      if ((Number(r.spend) || 0) > 0) activeMap[String(r.campaign_id)] = true;
+    });
+    directIds = resolveDirectCampaigns(Object.keys(activeMap), dirCache, fetchCampaignAdsets_);
+  }
   const currency = fetchAccountCurrency_(accountId);
   const days = assembleMetaDays(accountRows, campaignRows, directIds, from, to);
   const rates = getFxRates_(currency, dateRange(from, to), settings, fxCache);
@@ -329,9 +389,10 @@ function fetchMetaAccountDays_(accountId, from, to, settings, fxCache) {
 function fetchMetaDays(from, to, settings) {
   const fxCache = {};
   const currencies = {};
+  const dirCache = loadDirectCache_();
   const per = getMetaAccountIds().map(function (id) {
     try {
-      const r = fetchMetaAccountDays_(id, from, to, settings, fxCache);
+      const r = fetchMetaAccountDays_(id, from, to, settings, fxCache, dirCache);
       currencies[id] = r.currency;
       return r;
     } catch (e) {
@@ -339,6 +400,7 @@ function fetchMetaDays(from, to, settings) {
       throw e;
     }
   });
+  saveDirectCache_(dirCache);
   const direct = [];
   per.forEach(function (p) {
     p.directCampaigns.forEach(function (c) {
