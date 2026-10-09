@@ -7,9 +7,12 @@ const META_RETRY_CODES = [1, 2, 4, 17, 32, 613];
 
 function makeMetaError_(http, body) {
   const err = (body && body.error) || {};
-  const e = new Error('Meta API: HTTP ' + http + (err.code != null ? ', code ' + err.code : '') + (err.message ? ': ' + err.message : ''));
+  const e = new Error(
+    'Meta API: HTTP ' + http + (err.code != null ? ', code ' + err.code : '') + (err.error_subcode != null ? ', subcode ' + err.error_subcode : '') + (err.message ? ': ' + err.message : '')
+  );
   e.http = http;
   e.metaCode = err.code;
+  e.metaSubcode = err.error_subcode;
   e.isTokenError = err.code === 190;
   return e;
 }

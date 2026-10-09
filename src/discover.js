@@ -409,3 +409,47 @@ function checkDay() {
   discoverOut_(deps.store, 'checkDay ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
   console.log('checkDay: результат у листі «Discover»');
 }
+
+// Діагностика доступу до Meta: токен, права, кожен акаунт окремо (стан, причина відключення) і тестовий запит Insights.
+// Допомагає знайти, який саме акаунт або право дає помилку (напр. code 200 "API access blocked").
+function checkMeta() {
+  const deps = defaultDeps();
+  const to = yesterday_(deps);
+  const rows = [];
+  try {
+    const me = metaFetchJson_(metaBase_() + '/me?fields=id,name');
+    rows.push(['токен', 'OK', 'id=' + me.id + ' name=' + me.name, '', '', '']);
+  } catch (e) {
+    rows.push(['токен', 'ПОМИЛКА', errText_(e), '', '', '']);
+  }
+  try {
+    const perms = metaFetchJson_(metaBase_() + '/me/permissions');
+    rows.push([
+      'права токена',
+      (perms.data || [])
+        .map(function (p) {
+          return p.permission + ':' + p.status;
+        })
+        .join(', ') || '(порожньо)',
+      '', '', '', ''
+    ]);
+  } catch (e) {
+    rows.push(['права токена', 'ПОМИЛКА', errText_(e), '', '', '']);
+  }
+  getMetaAccountIds().forEach(function (id) {
+    try {
+      const a = metaFetchJson_(metaBase_() + '/' + id + '?fields=name,account_status,disable_reason,currency');
+      rows.push(['акаунт', id, 'OK', 'name=' + a.name, 'account_status=' + a.account_status + ' (1 = активний)', 'disable_reason=' + a.disable_reason + ' currency=' + a.currency]);
+    } catch (e) {
+      rows.push(['акаунт', id, 'ПОМИЛКА доступу до акаунта', errText_(e), '', '']);
+    }
+    try {
+      const ins = fetchInsights({ accountId: id, level: 'account', since: to, until: to, fields: 'spend' });
+      rows.push(['insights', id, 'OK', 'рядків за ' + to + ': ' + ins.length, ins.length ? 'spend=' + ins[0].spend : '', '']);
+    } catch (e) {
+      rows.push(['insights', id, 'ПОМИЛКА', errText_(e), '', '']);
+    }
+  });
+  discoverOut_(deps.store, 'checkMeta ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
+  console.log('checkMeta: результат у листі «Discover»');
+}

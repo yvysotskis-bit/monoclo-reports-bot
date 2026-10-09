@@ -57,6 +57,16 @@ function errText_(e) {
   return redactSecrets_(e && e.message ? e.message : String(e));
 }
 
+// Текст алерта про збій Meta: окремі підказки для недійсного токена та заблокованого доступу
+function metaAlertText_(e) {
+  if (e && e.isTokenError) return '🚨 Токен Meta недійсний — потрібно оновити META_ACCESS_TOKEN';
+  const base = '🚨 Дані Meta недоступні, звіт не надіслано: ' + errText_(e);
+  if (e && (e.metaCode === 200 || e.metaCode === 10)) {
+    return base + '\n👉 Перевірте: Налаштування бізнесу → Системні користувачі → Reports Bot → Призначені ресурси (чи є цей акаунт) і чи не обмежено додаток Monoclo Reports. Діагностика: функція checkMeta.';
+  }
+  return base;
+}
+
 function alertSafe_(deps, text) {
   try {
     deps.alert(text);
@@ -114,7 +124,7 @@ function collectData(deps, from, to) {
     res.metaOk = true;
   } catch (e) {
     deps.log('ERROR', 'Meta: ' + errText_(e));
-    alertSafe_(deps, e && e.isTokenError ? '🚨 Токен Meta недійсний — потрібно оновити META_ACCESS_TOKEN' : '🚨 Дані Meta недоступні, звіт не надіслано: ' + errText_(e));
+    alertSafe_(deps, metaAlertText_(e));
   }
 
   t0 = deps.now().getTime();

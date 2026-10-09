@@ -381,6 +381,15 @@ function suiteApis_(t) {
     t.eq(classifyMetaError(tok).retry, false);
     t.eq(classifyMetaError(makeMetaError_(400, { error: { code: 100 } })).retry, false);
   });
+  t.test('Meta: код 200 «API access blocked» — не ретрай, повідомлення з підкодом і підказкою в алерті', function () {
+    const e = makeMetaError_(400, { error: { code: 200, error_subcode: 1357045, message: 'API access blocked.' } });
+    t.eq(classifyMetaError(e).retry, false);
+    t.ok(e.message.indexOf('code 200') !== -1 && e.message.indexOf('subcode 1357045') !== -1);
+    const txt = metaAlertText_(e);
+    t.ok(txt.indexOf('Reports Bot') !== -1 && txt.indexOf('checkMeta') !== -1);
+    t.ok(metaAlertText_(makeMetaError_(400, { error: { code: 190 } })).indexOf('META_ACCESS_TOKEN') !== -1);
+    t.ok(metaAlertText_(makeMetaError_(500, null)).indexOf('checkMeta') === -1);
+  });
   t.test('Meta: Direct-кампанії (автовизначення та ручний список) і direct_spend за днями', function () {
     const adsets = [
       { campaign_id: '1', destination_type: 'WEBSITE' },
