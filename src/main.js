@@ -294,6 +294,24 @@ function resendYesterdayReport() {
   return resendReport();
 }
 
+// Після виправлення формул: перебудувати тексти звітів за останні n днів у листі (без відправки в Telegram).
+// Спершу потрібен backfill30 — він оновлює Meta_Daily.
+function rebuildReportsWith(deps, n) {
+  const last = yesterday_(deps);
+  for (let i = n - 1; i >= 0; i--) buildDailyReportWith(deps, addDays(last, -i), { force: true });
+}
+
+function rebuildLast7Reports() {
+  return rebuildReportsWith(defaultDeps(), 7);
+}
+
+// Надіслати в Telegram виправлені звіти за останні 3 дні (позначки «sent» ігноруються).
+function resendLast3Reports() {
+  const deps = defaultDeps();
+  const last = yesterday_(deps);
+  for (let i = 2; i >= 0; i--) sendReportFromSheetWith(deps, addDays(last, -i), { force: true });
+}
+
 function backfill(days) {
   return backfillWith(defaultDeps(), days);
 }

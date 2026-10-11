@@ -5,7 +5,8 @@ const ACTION_MAP = {
   view_content: ['omni_view_content', 'offsite_conversion.fb_pixel_view_content', 'view_content'],
   add_to_cart: ['omni_add_to_cart', 'offsite_conversion.fb_pixel_add_to_cart', 'add_to_cart'],
   initiate_checkout: ['omni_initiated_checkout', 'offsite_conversion.fb_pixel_initiate_checkout', 'initiate_checkout'],
-  purchases: ['omni_purchase', 'offsite_conversion.fb_pixel_purchase', 'purchase'],
+  // Лише подія пікселя сайту. omni_purchase додає onsite_conversion.purchase (покупки в чаті Direct) і завищує «САЙТ (піксель)»
+  purchases: ['offsite_conversion.fb_pixel_purchase', 'purchase'],
   conversations_started: ['onsite_conversion.messaging_conversation_started_7d'],
   first_replies: ['onsite_conversion.messaging_first_reply']
 };

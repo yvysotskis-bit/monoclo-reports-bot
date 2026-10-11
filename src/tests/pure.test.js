@@ -58,7 +58,7 @@ function suiteDates_(t) {
 }
 
 function suiteActions_(t) {
-  t.test('мапінг подій: якщо є omni_purchase і fb_pixel_purchase — рахується лише перший', function () {
+  t.test('мапінг подій: покупки сайту = fb_pixel_purchase, omni_purchase (з чатами Direct) ігнорується', function () {
     const row = {
       date_start: '2026-10-05', spend: '100', impressions: '1000', reach: '900', inline_link_clicks: '10',
       actions: [
@@ -72,8 +72,8 @@ function suiteActions_(t) {
       ]
     };
     const m = mapInsightRow(row);
-    t.eq(m.purchases, 9);
-    t.eq(m.purchase_value, 9000);
+    t.eq(m.purchases, 7);
+    t.eq(m.purchase_value, 7000);
   });
   t.test('мапінг подій: запасні типи, відсутні події = 0, розмови й відповіді', function () {
     const m = mapInsightRow({
@@ -459,6 +459,17 @@ function suiteFx_(t) {
     t.eq(r[0].purchases, 2);
     t.eq(days[0].spend, 10); // вхід не змінено
     t.throws(function () { convertDaysToUah(days, {}); });
+  });
+  t.test('цінність покупок уже в гривнях (середня > 150 у валюті акаунта) — не множиться на курс', function () {
+    const days = [
+      { date: 'd1', spend: 10, purchase_value: 3844.3, direct_spend: 0, purchases: 4 },
+      { date: 'd2', spend: 10, purchase_value: 39.75, direct_spend: 0, purchases: 2 },
+      { date: 'd3', spend: 10, purchase_value: 0, direct_spend: 0, purchases: 0 }
+    ];
+    const r = convertDaysToUah(days, { d1: 45, d2: 45, d3: 45 });
+    t.near(r[0].purchase_value, 3844.3);
+    t.near(r[1].purchase_value, 1788.75);
+    t.eq(r[2].purchase_value, 0);
   });
   t.test('курси: UAH = 1, fixed із налаштувань, fixed без значення — помилка', function () {
     t.eq(getFxRates_('UAH', ['d1', 'd2'], fxSettings(), {}), { d1: 1, d2: 1 });

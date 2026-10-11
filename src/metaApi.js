@@ -336,13 +336,19 @@ function getFxRates_(currency, dates, settings, cache) {
 }
 
 // Чисте: переводить грошові поля днів у UAH за курсами по датах. reach/покази/події не змінюються.
+// Піксель інколи передає цінність покупки в гривнях, але Meta вважає її валютою акаунта (USD): тоді одна покупка
+// "коштує" сотні й тисячі. Якщо середня цінність покупки за день > PURCHASE_VALUE_RAW_PER_ORDER (у валюті акаунта),
+// вважаємо її вже в UAH і не множимо на курс.
+const PURCHASE_VALUE_RAW_PER_ORDER = 150;
+
 function convertDaysToUah(days, ratesByDate) {
   return days.map(function (d) {
     const k = ratesByDate[d.date];
     if (!(k > 0)) throw new Error('Немає курсу для ' + d.date);
+    const valueIsUah = d.purchases > 0 && d.purchase_value / d.purchases > PURCHASE_VALUE_RAW_PER_ORDER;
     return Object.assign({}, d, {
       spend: Math.round(d.spend * k * 100) / 100,
-      purchase_value: Math.round(d.purchase_value * k * 100) / 100,
+      purchase_value: Math.round(d.purchase_value * (valueIsUah ? 1 : k) * 100) / 100,
       direct_spend: Math.round(d.direct_spend * k * 100) / 100
     });
   });
