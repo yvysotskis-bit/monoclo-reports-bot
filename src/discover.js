@@ -453,3 +453,52 @@ function checkMeta() {
   discoverOut_(deps.store, 'checkMeta ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
   console.log('checkMeta: результат у листі «Discover»');
 }
+
+// Діагностика покупок: які action_type і скільки дають покупок/цінності за кожен день (рівні акаунта і кампанії).
+// Запуск: checkPurchases() — дати з налаштування не потрібні, береться період «останні 4 дні, що закінчуються вчора».
+function checkPurchases() {
+  const deps = defaultDeps();
+  const to = yesterday_(deps);
+  const from = addDays(to, -3);
+  const rows = [];
+  const isPurchase = function (a) {
+    return /purchase/i.test(a.action_type);
+  };
+  getMetaAccountIds().forEach(function (id) {
+    try {
+      fetchInsights({ accountId: id, level: 'account', since: from, until: to, fields: META_ACCOUNT_FIELDS }).forEach(function (r) {
+        (r.actions || []).filter(isPurchase).forEach(function (a) {
+          rows.push(['акаунт', id, r.date_start, 'actions:' + a.action_type, a.value, '']);
+        });
+        (r.action_values || []).filter(isPurchase).forEach(function (a) {
+          rows.push(['акаунт', id, r.date_start, 'action_values:' + a.action_type, a.value, 'USD']);
+        });
+      });
+      fetchInsights({ accountId: id, level: 'campaign', since: from, until: to, fields: 'campaign_name,spend,actions,action_values' }).forEach(function (r) {
+        const p = (r.actions || []).filter(isPurchase);
+        if (!p.length) return;
+        const v = (r.action_values || []).filter(isPurchase);
+        rows.push([
+          'кампанія',
+          id,
+          r.date_start,
+          r.campaign_name,
+          p
+            .map(function (a) {
+              return a.action_type + '=' + a.value;
+            })
+            .join('; '),
+          v
+            .map(function (a) {
+              return a.action_type + '=' + a.value;
+            })
+            .join('; ')
+        ]);
+      });
+    } catch (e) {
+      rows.push(['акаунт', id, 'ПОМИЛКА', errText_(e), '', '']);
+    }
+  });
+  discoverOut_(deps.store, 'checkPurchases ' + from + '…' + to + ' ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
+  console.log('checkPurchases: результат у листі «Discover»');
+}
