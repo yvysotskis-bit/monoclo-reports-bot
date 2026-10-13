@@ -258,6 +258,7 @@ function suiteKeycrmReal_(t) {
       for (let i = 0; i < count; i++) data.push({ id: n * 1000 + i });
       return { current_page: n, data: data, last_page: last, per_page: 50, total: 100 };
     }
+    if (!inNode_()) return; // підміна Utilities можлива лише в Node
     withGlobals_({ Utilities: { sleep: function () {} } }, function () {
       let calls = 0;
       withGlobals_({ keycrmGet_: function (path, params) { calls++; return page(params.page, 50, 2); } }, function () {
