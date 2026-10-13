@@ -40,19 +40,43 @@ function defaultSettingsMap() {
 }
 
 // Лист «Налаштування» (рядки [ключ, значення, опис]) -> {ключ: значення}, з запасними дефолтами
+// Якщо ключ записано кілька разів: непорожнє значення перемагає порожнє (порожній дубль нічого не стирає);
+// два різні непорожні — виграє останній (попередження дає findDuplicateSettings).
 function parseSettingsRows(rows) {
   const o = defaultSettingsMap();
+  const filled = {};
   (rows || []).forEach(function (r) {
     const key = String(r[0] == null ? '' : r[0]).trim();
     if (!key || key === 'key' || key === 'ключ') return;
     if (r[1] === '' || r[1] == null) {
+      if (filled[key]) return; // раніше вже було непорожнє значення цього ключа
       if (key in o && typeof o[key] !== 'string') return; // порожнє числове значення -> лишається дефолт
       o[key] = '';
       return;
     }
     o[key] = r[1];
+    filled[key] = true;
   });
   return o;
+}
+
+// Ключі, що повторюються в листі «Налаштування» з різними непорожніми значеннями: ["ключ: 1 / 2", ...]
+function findDuplicateSettings(rows) {
+  const seen = {};
+  const out = [];
+  (rows || []).forEach(function (r) {
+    const key = String(r[0] == null ? '' : r[0]).trim();
+    if (!key || key === 'key' || key === 'ключ' || r[1] === '' || r[1] == null) return;
+    const v = String(r[1]);
+    if (seen[key] === undefined) seen[key] = [v];
+    else if (seen[key].indexOf(v) === -1) {
+      seen[key].push(v);
+      if (seen[key].length === 2) out.push(key);
+    }
+  });
+  return out.map(function (k) {
+    return k + ': ' + seen[k].join(' / ');
+  });
 }
 
 function settingNum(settings, key) {

@@ -39,6 +39,38 @@ function pickPath(obj, paths) {
   return '';
 }
 
+// Інтеграція сайту -> KeyCRM часто лишає marketing = null, але пише мітки в коментар менеджера рядком
+// "UTM: utm_source: facebook; utm_medium: cpc; utm_campaign: warm; fbclid: ..." (перевірено на реальних замовленнях).
+// Беремо лише цей рядок і лише відомі ключі; решту коментаря (контакти, адреси) ігноруємо.
+const UTM_COMMENT_KEYS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid'];
+
+function utmFromComment(text) {
+  const out = {};
+  const m = /(?:^|\n)[ \t]*UTM:([^\n]*)/.exec(String(text == null ? '' : text));
+  if (!m) return out;
+  m[1].split(';').forEach(function (part) {
+    const kv = /^\s*([A-Za-z_]+)\s*:\s*(.*?)\s*$/.exec(part);
+    if (!kv) return;
+    const key = kv[1].toLowerCase();
+    if (UTM_COMMENT_KEYS.indexOf(key) !== -1 && kv[2] !== '' && out[key] === undefined) out[key] = kv[2];
+  });
+  return out;
+}
+
+// Мітки замовлення з marketing; якщо їх там немає — з коментаря. {utm, origin: 'keycrm'|'comment'|'none'}
+function utmFromRaw_(raw) {
+  const utm = {};
+  UTM_COMMENT_KEYS.forEach(function (k) {
+    utm[k] = String(pickPath(raw, KEYCRM_FIELDS[k]));
+  });
+  if (hasAnyUtm(utm)) return { utm: utm, origin: 'keycrm' };
+  const c = utmFromComment(raw && raw.manager_comment);
+  UTM_COMMENT_KEYS.forEach(function (k) {
+    utm[k] = c[k] || '';
+  });
+  return hasAnyUtm(utm) ? { utm: utm, origin: 'comment' } : { utm: utm, origin: 'none' };
+}
+
 // Сире замовлення KeyCRM -> рядок KeyCRM_Orders (розділ 4.5).
 // ctx: {settings, rules, statusNames: {id: name}, utmFallback?: (raw) => utm|null}
 function normalizeOrder(raw, ctx) {
@@ -50,11 +82,9 @@ function normalizeOrder(raw, ctx) {
   const orderedTs = parseTimestamp(pickPath(raw, F.orderedAt), ctx.settings.keycrm_naive_timestamp_tz);
   const orderDate = dateInTz(isFinite(orderedTs) ? new Date(orderedTs) : when, KYIV_TZ);
 
-  const utm = {};
-  ['utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'gclid', 'fbclid'].forEach(function (k) {
-    utm[k] = String(pickPath(raw, F[k]));
-  });
-  let origin = hasAnyUtm(utm) ? 'keycrm' : 'none';
+  const found = utmFromRaw_(raw);
+  const utm = found.utm;
+  let origin = found.origin;
   if (origin === 'none' && ctx.utmFallback) {
     const fb = ctx.utmFallback(raw);
     if (fb) {
@@ -179,13 +209,21 @@ function fetchKeycrmOrders(from, to, settings, rules, existing) {
       shopifyError = redactSecrets_(e && e.message ? e.message : String(e));
     }
   }
-  const orders = raws
-    .map(function (raw) {
-      return normalizeOrder(raw, { settings: settings, rules: rules, statusNames: statusNames, utmFallback: fallback });
-    })
-    .filter(function (o) {
-      return o.date >= from && o.date <= to;
-    });
+  // Одне "биття" замовлення (напр. без дати) не повинно зупиняти завантаження всіх інших
+  const skipped = [];
+  const normalized = [];
+  raws.forEach(function (raw) {
+    try {
+      normalized.push(normalizeOrder(raw, { settings: settings, rules: rules, statusNames: statusNames, utmFallback: fallback }));
+    } catch (e) {
+      skipped.push(String(pickPath(raw, KEYCRM_FIELDS.id)) + ': ' + (e && e.message ? e.message : e));
+    }
+  });
+  const orders = normalized.filter(function (o) {
+    return o.date >= from && o.date <= to;
+  });
   orders.shopifyError = shopifyError;
+  orders.skipped = skipped;
+  orders.rawCount = raws.length;
   return orders;
 }

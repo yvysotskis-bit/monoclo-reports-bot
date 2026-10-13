@@ -218,7 +218,7 @@ function buildShopifyFallback_(raws, settings, existing, today) {
   raws.forEach(function (raw) {
     const group = classifySource(pickPath(raw, KEYCRM_FIELDS.sourceId), settings);
     if (group !== 'site' && group !== 'quickorders') return;
-    if (hasAnyUtm(extractUtm_(raw))) return;
+    if (utmFromRaw_(raw).origin !== 'none') return; // мітки вже є (marketing або коментар) — Shopify не потрібен
     const id = String(pickPath(raw, KEYCRM_FIELDS.id));
     const ex = existing[id];
     if (ex && ex.utm_origin === 'shopify') {

@@ -697,5 +697,5 @@ function suiteKeycrm_(t) {
 }
 
 function getTestSuites_() {
-  return [suiteFormat_, suiteDates_, suiteActions_, suiteAttribution_, suiteMetrics_, suiteRules_, suiteTelegram_, suiteStorage_, suiteApis_, suiteMetaAccounts_, suiteFx_, suiteShopify_, suiteSpeed_, suiteDiag_, suiteKeycrm_, suiteMsg1_, suiteFlow_];
+  return [suiteFormat_, suiteDates_, suiteActions_, suiteAttribution_, suiteMetrics_, suiteRules_, suiteTelegram_, suiteStorage_, suiteApis_, suiteMetaAccounts_, suiteFx_, suiteShopify_, suiteSpeed_, suiteDiag_, suiteKeycrm_, suiteMsg1_, suiteFlow_, suiteStoreSafety_, suiteLocks_, suiteMergeRound_, suiteKeycrmReal_, suiteConfigRobust_, suiteTelegramRobust_, suiteFlowRobust_];
 }

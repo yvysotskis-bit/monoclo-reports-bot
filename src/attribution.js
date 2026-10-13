@@ -69,10 +69,32 @@ function ruleMatches_(rule, utm) {
         return val.indexOf(x) !== -1;
       });
     case 'regex':
-      return new RegExp(rule.values, 'i').test(val);
+      try {
+        return new RegExp(rule.values, 'i').test(val);
+      } catch (e) {
+        return false; // некоректний шаблон у листі не повинен валити весь запуск; його показує findInvalidRules
+      }
     default:
       return false;
   }
+}
+
+// Рядки правил, які рушій не зможе застосувати (некоректний regex, невідомий оператор/поле) — для попередження в Лог
+function findInvalidRules(rules) {
+  const bad = [];
+  (rules || []).forEach(function (r) {
+    let why = '';
+    if (['in', 'contains', 'not_empty', 'regex'].indexOf(r.operator) === -1) why = 'невідомий оператор «' + r.operator + '»';
+    else if (r.operator === 'regex') {
+      try {
+        new RegExp(r.values, 'i');
+      } catch (e) {
+        why = 'некоректний regex «' + r.values + '»';
+      }
+    } else if ((r.operator === 'in' || r.operator === 'contains') && splitList_(r.values).length === 0) why = 'порожній список значень';
+    if (why) bad.push('пріоритет ' + r.priority + ' ' + r.channel + '/' + r.field + ': ' + why);
+  });
+  return bad;
 }
 
 // utm: {utm_source, utm_medium, utm_campaign, utm_content, utm_term, gclid, fbclid}

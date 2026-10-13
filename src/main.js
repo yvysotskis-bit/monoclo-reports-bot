@@ -2,7 +2,15 @@
 // тому сценарії "KeyCRM недоступний", "Meta недоступна", захист від дублів тестуються без GAS.
 
 // Розклад. Частина Б додасть сюди тижневий (пн 09:30) і місячний (1-ше число 09:30) звіти.
-const TRIGGERS = [{ handler: 'runDailyReport', hour: 9, minute: 0 }];
+// runDailyReportRetry о 11:00 і 14:00 нічого не робить, якщо звіт за вчора вже надіслано, а якщо ранковий запуск
+// не вдався (Meta/Telegram тимчасово недоступні) — пробує ще раз, тож день не пропадає мовчки.
+const TRIGGERS = [
+  { handler: 'runDailyReport', hour: 9, minute: 0 },
+  { handler: 'runDailyReportRetry', hour: 11, minute: 0 },
+  { handler: 'runDailyReportRetry', hour: 14, minute: 0 }
+];
+
+const LOCK_WAIT_MS = 90000;
 
 const LOG_MAX_ROWS = 5000;
 
@@ -67,9 +75,16 @@ function metaAlertText_(e) {
   return base;
 }
 
+// Той самий алерт не повторюється протягом доби (інакше тригери 9:00/11:00/14:00 і ручні запуски засипали б чат)
 function alertSafe_(deps, text) {
   try {
+    const sig = dateInTz(deps.now(), KYIV_TZ) + '|' + String(text).slice(0, 300);
+    if (deps.state.get('last_alert') === sig) {
+      deps.log('INFO', 'Алерт не повторено (сьогодні вже надсилався): ' + String(text).slice(0, 100));
+      return;
+    }
     deps.alert(text);
+    deps.state.set('last_alert', sig);
   } catch (e) {
     deps.log('ERROR', 'Не вдалося надіслати алерт: ' + errText_(e));
   }
@@ -78,6 +93,22 @@ function alertSafe_(deps, text) {
 function rebuildCrmDaily_(store, dates) {
   const rows = buildCrmDaily(store.read('KeyCRM_Orders'), dates);
   store.write('CRM_Daily', replaceByDates(store.read('CRM_Daily'), rows, dates));
+}
+
+// Рядки KeyCRM_Orders, створені у вікні [from, to] (за Києвом), яких немає серед щойно завантажених замовлень:
+// замовлення видалили або в KeyCRM змінили його дату поза вікно. Без прибирання вони лишались би в CRM_Daily назавжди.
+// Повертає {order_id: true}.
+function staleOrderIds(existingRows, fetchedOrders, from, to) {
+  const keep = {};
+  fetchedOrders.forEach(function (o) {
+    keep[String(o.order_id)] = true;
+  });
+  const stale = {};
+  existingRows.forEach(function (r) {
+    const created = String(r.created_at_kyiv || '').slice(0, 10);
+    if (created >= from && created <= to && !keep[String(r.order_id)]) stale[String(r.order_id)] = true;
+  });
+  return stale;
 }
 
 // Нове невідоме джерело: попередження в Лог і не частіше разу на добу — в алерт-чат
@@ -121,6 +152,10 @@ function collectData(deps, from, to) {
     deps.log('INFO', 'Meta: етап тривав ' + sec(t0));
     deps.log('INFO', 'Meta: оновлено ' + m.days.length + ' дн. (' + from + '…' + to + '). Валюти акаунтів: ' + JSON.stringify(m.currencies || {}) + '. Direct-кампанії з витратами: ' + (m.directCampaigns.join(', ') || 'немає'));
     if (m.fxFallback) deps.log('WARN', 'Курс НБУ недоступний — використано фіксований курс з налаштувань (meta_fx_fixed_rate)');
+    Object.keys(m.timezones || {}).forEach(function (id) {
+      const tz = m.timezones[id];
+      if (tz && tz !== KYIV_TZ) deps.log('WARN', 'Рекламний акаунт ' + id + ' працює в часовій зоні ' + tz + ', а звіт — за ' + KYIV_TZ + ': межі доби в Meta і KeyCRM можуть не збігатися');
+    });
     res.metaOk = true;
   } catch (e) {
     deps.log('ERROR', 'Meta: ' + errText_(e));
@@ -130,8 +165,15 @@ function collectData(deps, from, to) {
   t0 = deps.now().getTime();
   deps.log('INFO', 'KeyCRM: завантаження замовлень…');
   try {
+    findInvalidRules(rules).forEach(function (w) {
+      deps.log('WARN', 'Правила_UTM: ' + w + ' — правило ігнорується');
+    });
+    findDuplicateSettings(deps.store.readRaw('Налаштування')).forEach(function (w) {
+      deps.log('WARN', 'Налаштування: ключ повторюється з різними значеннями (діє останнє) — ' + w);
+    });
+    const existingRows = deps.store.read('KeyCRM_Orders');
     const existing = {};
-    deps.store.read('KeyCRM_Orders').forEach(function (r) {
+    existingRows.forEach(function (r) {
       existing[String(r.order_id)] = r;
     });
     const orders = deps.fetchOrders(from, to, settings, rules, existing);
@@ -139,13 +181,33 @@ function collectData(deps, from, to) {
       deps.log('WARN', 'Shopify (резерв UTM) недоступний: ' + orders.shopifyError);
       alertSafe_(deps, '⚠️ Резерв UTM із Shopify недоступний: ' + orders.shopifyError);
     }
-    upsertSheet(
-      deps.store,
-      'KeyCRM_Orders',
+    if (orders.skipped && orders.skipped.length) {
+      deps.log('WARN', 'KeyCRM: пропущено ' + orders.skipped.length + ' замовл. через помилку даних: ' + orders.skipped.slice(0, 3).join(' | '));
+    }
+    let merged = upsertRows(
+      existingRows,
       orders.map(function (o) {
         return Object.assign({}, o, { updated_at: stamp });
-      })
+      }),
+      SHEETS['KeyCRM_Orders'].keys
     );
+    const stale = staleOrderIds(existingRows, orders, from, to);
+    const staleCount = Object.keys(stale).length;
+    const inWindow = existingRows.filter(function (r) {
+      const c = String(r.created_at_kyiv || '').slice(0, 10);
+      return c >= from && c <= to;
+    }).length;
+    if (staleCount) {
+      if (!orders.length || (staleCount > 5 && staleCount > inWindow * 0.3)) {
+        deps.log('WARN', 'KeyCRM: ' + staleCount + ' із ' + inWindow + ' замовлень вікна відсутні у відповіді API — вважаю відповідь підозрілою і нічого не прибираю');
+      } else {
+        merged = merged.filter(function (r) {
+          return !stale[String(r.order_id)];
+        });
+        deps.log('WARN', 'KeyCRM: прибрано ' + staleCount + ' замовл., яких більше немає у вікні ' + from + '…' + to + ' (видалені або змінена дата): ' + Object.keys(stale).slice(0, 10).join(', '));
+      }
+    }
+    deps.store.write('KeyCRM_Orders', merged);
     rebuildCrmDaily_(deps.store, dateRange(from, to));
     deps.log('INFO', 'KeyCRM (разом із Shopify та записом у таблицю): етап тривав ' + sec(t0));
     deps.log('INFO', 'KeyCRM: оновлено ' + orders.length + ' замовл. (' + from + '…' + to + ')');
@@ -205,21 +267,26 @@ function sendReportFromSheetWith(deps, date, opts) {
   let sent = 0;
   const chat = deps.chatId(def.chatSecret);
   targets.forEach(function (row) {
+    // Довгий звіт іде кількома повідомленнями: якщо збій стався посередині, при повторі вже доставлені частини
+    // (їхні id лишились у tg_message_id рядка зі статусом error) не надсилаються вдруге.
+    const prior = !opts.force && String(row.status) === 'error' && String(row.tg_message_id || '') ? String(row.tg_message_id).split(',') : [];
     try {
-      const res = deps.sendText(chat, String(row.text));
+      const res = deps.sendText(chat, String(row.text), prior.length);
       row.status = 'sent';
       row.sent_at = dateTimeInTz(deps.now(), KYIV_TZ);
-      row.tg_message_id = res.messageIds.join(',');
+      row.tg_message_id = prior.concat(res.messageIds).join(',');
       row.error = '';
       sent++;
     } catch (e) {
       row.status = 'error';
+      row.tg_message_id = prior.concat((e && e.sentIds) || []).join(',');
       row.error = errText_(e);
       deps.log('ERROR', 'Telegram: ' + row.error);
       alertSafe_(deps, '🚨 Не вдалося надіслати звіт ' + report + ' за ' + date + ': ' + row.error);
     }
+    // Статус записується одразу після кожного повідомлення: якщо запуск обірветься, "sent" уже збережено і дубля не буде
+    deps.store.write('Звіт_Щодня', all);
   });
-  deps.store.write('Звіт_Щодня', all);
   return { sent: sent };
 }
 
@@ -244,6 +311,17 @@ function runDailyReportInner_(deps, opts) {
   return { status: 'ok', date: date, crmOk: res.crmOk };
 }
 
+// Повторний запуск (11:00, 14:00): якщо звіт за вчора вже надіслано — нічого не робить і не звертається до API
+function runDailyReportRetryWith(deps) {
+  const date = yesterday_(deps);
+  const done = deps.store.read('Звіт_Щодня').some(function (r) {
+    return r.date === date && r.report === 'meta' && String(r.status) === 'sent';
+  });
+  if (done) return { status: 'already_sent', date: date };
+  deps.log('INFO', 'Повторна спроба: звіт за ' + date + ' ще не надіслано');
+  return runDailyReportWith(deps, { send: true });
+}
+
 function reclassifyOrdersWith(deps) {
   const orders = reclassifyRows(deps.store.read('KeyCRM_Orders'), deps.getRules(), deps.getSettings());
   deps.store.write('KeyCRM_Orders', orders);
@@ -266,27 +344,60 @@ function backfillWith(deps, days) {
 
 // ---- Точки входу з розділу 8 ----
 
+// Усі точки входу, що пишуть у таблицю або надсилають у Telegram, виконуються під спільним замком скрипта:
+// ручний запуск, що збігся з тригером (або два тригери), інакше читали б і перезаписували листи одночасно
+// (втрата рядків) та могли б обидва надіслати звіт (дубль). Хто не отримав замок за LOCK_WAIT_MS — пропускає запуск.
+function lockedRun_(label, fn) {
+  const deps = defaultDeps();
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(LOCK_WAIT_MS)) {
+    try {
+      deps.log('WARN', label + ': пропущено — інший запуск ще виконується');
+    } catch (e) {
+      console.log(label + ': пропущено — інший запуск ще виконується');
+    }
+    return { status: 'locked' };
+  }
+  try {
+    RUN_START_MS = Date.now(); // бюджет часу рахується від початку роботи, а не від очікування замка
+    return fn(deps);
+  } finally {
+    lock.releaseLock();
+  }
+}
+
 function runDailyReport() {
-  return runDailyReportWith(defaultDeps(), { send: true });
+  return lockedRun_('runDailyReport', function (deps) {
+    return runDailyReportWith(deps, { send: true });
+  });
+}
+
+function runDailyReportRetry() {
+  return lockedRun_('runDailyReportRetry', runDailyReportRetryWith);
 }
 
 function dryRun() {
-  return runDailyReportWith(defaultDeps(), { send: false });
+  return lockedRun_('dryRun', function (deps) {
+    return runDailyReportWith(deps, { send: false });
+  });
 }
 
 function buildDailyReport(date) {
-  const deps = defaultDeps();
-  return buildDailyReportWith(deps, normDate_(date, deps), {});
+  return lockedRun_('buildDailyReport', function (deps) {
+    return buildDailyReportWith(deps, normDate_(date, deps), {});
+  });
 }
 
 function sendReportFromSheet(date) {
-  const deps = defaultDeps();
-  return sendReportFromSheetWith(deps, normDate_(date, deps), {});
+  return lockedRun_('sendReportFromSheet', function (deps) {
+    return sendReportFromSheetWith(deps, normDate_(date, deps), {});
+  });
 }
 
 function resendReport(date) {
-  const deps = defaultDeps();
-  return sendReportFromSheetWith(deps, normDate_(date, deps), { force: true });
+  return lockedRun_('resendReport', function (deps) {
+    return sendReportFromSheetWith(deps, normDate_(date, deps), { force: true });
+  });
 }
 
 // У редакторі Apps Script функції не можна запускати з аргументами — для ручного запуску:
@@ -295,25 +406,30 @@ function resendYesterdayReport() {
 }
 
 // Після виправлення формул: перебудувати тексти звітів за останні n днів у листі (без відправки в Telegram).
-// Спершу потрібен backfill30 — він оновлює Meta_Daily.
+// Спершу потрібен backfill30 — він оновлює Meta_Daily. Уже відправлені рядки лишаються зі статусом sent.
 function rebuildReportsWith(deps, n) {
   const last = yesterday_(deps);
   for (let i = n - 1; i >= 0; i--) buildDailyReportWith(deps, addDays(last, -i), { force: true });
 }
 
 function rebuildLast7Reports() {
-  return rebuildReportsWith(defaultDeps(), 7);
+  return lockedRun_('rebuildLast7Reports', function (deps) {
+    return rebuildReportsWith(deps, 7);
+  });
 }
 
 // Надіслати в Telegram виправлені звіти за останні 3 дні (позначки «sent» ігноруються).
 function resendLast3Reports() {
-  const deps = defaultDeps();
-  const last = yesterday_(deps);
-  for (let i = 2; i >= 0; i--) sendReportFromSheetWith(deps, addDays(last, -i), { force: true });
+  return lockedRun_('resendLast3Reports', function (deps) {
+    const last = yesterday_(deps);
+    for (let i = 2; i >= 0; i--) sendReportFromSheetWith(deps, addDays(last, -i), { force: true });
+  });
 }
 
 function backfill(days) {
-  return backfillWith(defaultDeps(), days);
+  return lockedRun_('backfill', function (deps) {
+    return backfillWith(deps, days);
+  });
 }
 
 function backfill30() {
@@ -321,7 +437,7 @@ function backfill30() {
 }
 
 function reclassifyOrders() {
-  return reclassifyOrdersWith(defaultDeps());
+  return lockedRun_('reclassifyOrders', reclassifyOrdersWith);
 }
 
 function installTrigger() {
@@ -334,7 +450,7 @@ function installTrigger() {
   TRIGGERS.forEach(function (t) {
     ScriptApp.newTrigger(t.handler).timeBased().everyDays(1).atHour(t.hour).nearMinute(t.minute || 0).inTimezone(KYIV_TZ).create();
   });
-  console.log('Тригери встановлено: ' + handlers.join(', ') + ' (щодня ~' + TRIGGERS[0].hour + ':00 Europe/Kyiv)');
+  console.log('Тригери встановлено: ' + TRIGGERS.map(function (t) { return t.handler + ' ~' + t.hour + ':' + pad2_(t.minute || 0); }).join(', ') + ' (Europe/Kyiv)');
 }
 
 // Створює всі листи, заголовки, формати, валідацію, значення за замовчуванням. Безпечно запускати повторно.

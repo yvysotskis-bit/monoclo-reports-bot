@@ -105,23 +105,33 @@ function classifyTelegramError(e) {
   return { retry: false };
 }
 
-// Надсилає текст у чат; повертає {messageIds: [..]}
-function sendTelegramText(chatId, text) {
+// Надсилає текст у чат; повертає {messageIds: [..]} (лише нові частини).
+// skipParts — скільки перших частин уже доставлено раніше (повторна спроба після збою на середині довгого звіту):
+// їх не надсилаємо вдруге. Якщо збій стався посеред відправки, у помилці лишається e.sentIds — частини, що встигли піти.
+function sendTelegramText(chatId, text, skipParts) {
   const token = requireSecret('TG_BOT_TOKEN');
   const ids = [];
-  buildTelegramMessages(text).forEach(function (html) {
-    const res = withRetry(
-      function () {
-        return tgCall_(token, 'sendMessage', {
-          chat_id: chatId,
-          text: html,
-          parse_mode: 'HTML',
-          disable_web_page_preview: true
-        });
-      },
-      classifyTelegramError,
-      { delays: [2000, 5000, 10000], sleep: function (ms) { Utilities.sleep(ms); } }
-    );
+  const skip = Math.max(0, Number(skipParts) || 0);
+  buildTelegramMessages(text).forEach(function (html, i) {
+    if (i < skip) return;
+    let res;
+    try {
+      res = withRetry(
+        function () {
+          return tgCall_(token, 'sendMessage', {
+            chat_id: chatId,
+            text: html,
+            parse_mode: 'HTML',
+            disable_web_page_preview: true
+          });
+        },
+        classifyTelegramError,
+        { delays: [2000, 5000, 10000], sleep: function (ms) { Utilities.sleep(ms); } }
+      );
+    } catch (e) {
+      e.sentIds = ids.slice();
+      throw e;
+    }
     ids.push(res.message_id);
   });
   return { messageIds: ids };
@@ -130,5 +140,13 @@ function sendTelegramText(chatId, text) {
 // Звичайний текст без <pre> (алерти)
 function sendTelegramPlain(chatId, text) {
   const token = requireSecret('TG_BOT_TOKEN');
-  tgCall_(token, 'sendMessage', { chat_id: chatId, text: text, disable_web_page_preview: true });
+  // Telegram обмежує повідомлення 4096 символами: довгий алерт обрізаємо, а не губимо
+  const body = String(text).length > TG_LIMIT ? String(text).slice(0, TG_LIMIT - 1) + '…' : String(text);
+  withRetry(
+    function () {
+      return tgCall_(token, 'sendMessage', { chat_id: chatId, text: body, disable_web_page_preview: true });
+    },
+    classifyTelegramError,
+    { delays: [2000, 5000, 10000], sleep: function (ms) { Utilities.sleep(ms); } }
+  );
 }

@@ -245,7 +245,10 @@ function mergeAccountDays(daysPerAccount) {
   });
   return order.sort().map(function (date) {
     const r = byDate[date];
-    r.direct_spend = Math.round(r.direct_spend * 100) / 100;
+    // суми дробових чисел дають "хвости" на кшталт 5046.4400000000005 — грошові поля округлюємо до копійок
+    ['spend', 'purchase_value', 'direct_spend'].forEach(function (k) {
+      r[k] = Math.round((Number(r[k]) || 0) * 100) / 100;
+    });
     return r;
   });
 }
@@ -360,7 +363,18 @@ function fetchAccountCurrency_(accountId) {
   return body.currency;
 }
 
-// Один акаунт: {days (у UAH), directCampaigns (з витратами за період), currency}
+// Доба в Insights рахується за часовою зоною рекламного акаунта, а звіт — за Києвом. Якщо зони різні, межі днів
+// не збігаються з KeyCRM. Запит best-effort: помилка (або невідоме поле) не повинна ламати звіт — повертаємо ''.
+function fetchAccountTimezone_(accountId) {
+  try {
+    const body = metaFetchJson_(metaBase_() + '/' + accountId + '?fields=timezone_name');
+    return body && body.timezone_name ? String(body.timezone_name) : '';
+  } catch (e) {
+    return '';
+  }
+}
+
+// Один акаунт: {days (у UAH), directCampaigns (з витратами за період), currency, timezone}
 function fetchMetaAccountDays_(accountId, from, to, settings, fxCache, dirCache) {
   const accountRows = fetchInsights({ accountId: accountId, level: 'account', since: from, until: to, fields: META_ACCOUNT_FIELDS });
   const campaignRows = fetchInsights({ accountId: accountId, level: 'campaign', since: from, until: to, fields: META_CAMPAIGN_FIELDS });
@@ -377,6 +391,7 @@ function fetchMetaAccountDays_(accountId, from, to, settings, fxCache, dirCache)
     directIds = resolveDirectCampaigns(Object.keys(activeMap), dirCache, fetchCampaignAdsets_);
   }
   const currency = fetchAccountCurrency_(accountId);
+  const timezone = fetchAccountTimezone_(accountId);
   const days = assembleMetaDays(accountRows, campaignRows, directIds, from, to);
   const rates = getFxRates_(currency, dateRange(from, to), settings, fxCache);
   const active = {};
@@ -389,7 +404,8 @@ function fetchMetaAccountDays_(accountId, from, to, settings, fxCache, dirCache)
     directCampaigns: directIds.filter(function (id) {
       return active[id];
     }),
-    currency: currency
+    currency: currency,
+    timezone: timezone
   };
 }
 
@@ -398,11 +414,13 @@ function fetchMetaAccountDays_(accountId, from, to, settings, fxCache, dirCache)
 function fetchMetaDays(from, to, settings) {
   const fxCache = {};
   const currencies = {};
+  const timezones = {};
   const dirCache = loadDirectCache_();
   const per = getMetaAccountIds().map(function (id) {
     try {
       const r = fetchMetaAccountDays_(id, from, to, settings, fxCache, dirCache);
       currencies[id] = r.currency;
+      timezones[id] = r.timezone;
       return r;
     } catch (e) {
       e.message = '[' + id + '] ' + e.message; // нехай алерт покаже, який акаунт підвів
@@ -424,6 +442,7 @@ function fetchMetaDays(from, to, settings) {
     ),
     directCampaigns: direct,
     currencies: currencies,
+    timezones: timezones,
     fxFallback: !!fxCache.fallbackUsed
   };
 }

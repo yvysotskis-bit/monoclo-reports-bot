@@ -69,15 +69,26 @@ function replaceByDates(existing, incoming, dates) {
     .concat(incoming);
 }
 
-// Звіт_Щодня: рядки зі статусом sent не змінюються, крім force (resendReport)
+// Звіт_Щодня: рядки зі статусом sent не змінюються, крім force (перебудова тексту).
+// При force відправлений рядок зберігає status/sent_at/tg_message_id — інакше перебудова "забула б", що звіт уже в чаті,
+// і наступне надсилання створило б дубль; у error лишається позначка про зміну тексту.
 function mergeReportRows(existing, incoming, force) {
   const keys = SHEETS['Звіт_Щодня'].keys;
   const sent = {};
   existing.forEach(function (r) {
-    if (String(r.status) === 'sent') sent[rowKey_(r, keys)] = true;
+    if (String(r.status) === 'sent') sent[rowKey_(r, keys)] = r;
   });
-  const toWrite = incoming.filter(function (r) {
-    return force || !sent[rowKey_(r, keys)];
+  const toWrite = [];
+  incoming.forEach(function (r) {
+    const prev = sent[rowKey_(r, keys)];
+    if (!prev) {
+      toWrite.push(r);
+    } else if (force) {
+      toWrite.push(Object.assign({}, r, {
+        status: 'sent', sent_at: prev.sent_at, tg_message_id: prev.tg_message_id,
+        error: String(prev.text) === String(r.text) ? '' : 'текст перебудовано після відправки'
+      }));
+    }
   });
   return upsertRows(existing, toWrite, keys);
 }
@@ -97,6 +108,12 @@ function getOrCreateSheet_(name) {
   let sh = ss.getSheetByName(name);
   if (!sh) sh = ss.insertSheet(name);
   return sh;
+}
+
+// Apps Script відкладає запис у таблицю до кінця виконання; якщо запуск буде перервано (ліміт часу), відкладене губиться.
+// Тому після кожного запису скидаємо чергу — зокрема статус "sent" до наступної відправки в Telegram.
+function flush_() {
+  if (typeof SpreadsheetApp !== 'undefined' && typeof SpreadsheetApp.flush === 'function') SpreadsheetApp.flush();
 }
 
 function cellOut_(v, header) {
@@ -136,21 +153,26 @@ function sheetStore() {
           return o;
         });
     },
-    // повна заміна даних листа (рядки 2…)
+    // повна заміна даних листа (рядки 2…). Спершу записуємо нові дані НА МІСЦІ старих і лише потім очищуємо зайвий
+    // "хвіст": якщо запуск обірветься посередині, у листі лишаються старі або нові дані, а не порожній лист.
     write: function (name, rows) {
       const headers = SHEETS[name].headers;
       const sh = getOrCreateSheet_(name);
       const last = sh.getLastRow();
-      if (last > 1) sh.getRange(2, 1, last - 1, Math.max(sh.getLastColumn(), headers.length)).clearContent();
-      if (!rows.length) return;
-      const need = rows.length + 1;
-      if (sh.getMaxRows() < need) sh.insertRowsAfter(sh.getMaxRows(), need - sh.getMaxRows());
-      const values = rows.map(function (r) {
-        return headers.map(function (h) {
-          return r[h] == null ? '' : r[h];
+      if (rows.length) {
+        const need = rows.length + 1;
+        if (sh.getMaxRows() < need) sh.insertRowsAfter(sh.getMaxRows(), need - sh.getMaxRows());
+        const values = rows.map(function (r) {
+          return headers.map(function (h) {
+            return r[h] == null ? '' : r[h];
+          });
         });
-      });
-      sh.getRange(2, 1, values.length, headers.length).setValues(values);
+        sh.getRange(2, 1, values.length, headers.length).setValues(values);
+      }
+      if (last > rows.length + 1) {
+        sh.getRange(rows.length + 2, 1, last - rows.length - 1, Math.max(sh.getLastColumn(), headers.length)).clearContent();
+      }
+      flush_();
     },
     append: function (name, rows) {
       if (!rows.length) return;
@@ -165,6 +187,7 @@ function sheetStore() {
         });
       });
       sh.getRange(start, 1, values.length, headers.length).setValues(values);
+      flush_();
     }
   };
 }
