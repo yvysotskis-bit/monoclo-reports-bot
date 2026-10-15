@@ -477,10 +477,18 @@ function suiteFx_(t) {
     t.throws(function () { getFxRates_('USD', ['d1'], fxSettings({ meta_fx_mode: 'fixed', meta_fx_fixed_rate: '' }), {}); });
   });
   t.test('курс: НБУ недоступний -> запасний фіксований курс (з позначкою), без нього — помилка з причиною', function () {
-    const cache = {};
-    t.eq(getFxRates_('USD', ['2026-10-05'], fxSettings({ meta_fx_mode: 'nbu', meta_fx_fixed_rate: 41.5 }), cache), { '2026-10-05': 41.5 });
-    t.eq(cache.fallbackUsed, true);
-    t.throws(function () { getFxRates_('USD', ['2026-10-05'], fxSettings({ meta_fx_mode: 'nbu', meta_fx_fixed_rate: '' }), {}); });
+    // Тест не залежить від мережі: недоступність НБУ імітується (в Apps Script НБУ відповідає насправді)
+    withGlobals_({ fetchNbuRate_: function () { throw new Error('НБУ недоступний (імітація)'); } }, function () {
+      const cache = {};
+      t.eq(getFxRates_('USD', ['2026-10-05'], fxSettings({ meta_fx_mode: 'nbu', meta_fx_fixed_rate: 41.5 }), cache), { '2026-10-05': 41.5 });
+      t.eq(cache.fallbackUsed, true);
+      t.throws(function () { getFxRates_('USD', ['2026-10-05'], fxSettings({ meta_fx_mode: 'nbu', meta_fx_fixed_rate: '' }), {}); });
+    });
+  });
+  t.test('курс НБУ на дату береться з кешу запиту; відповідь НБУ розбирається за кодом валюти', function () {
+    withGlobals_({ fetchNbuRate_: function (cc, ymd) { return ymd === '2026-10-05' ? 44.9857 : 45.1; } }, function () {
+      t.eq(getFxRates_('USD', ['2026-10-05', '2026-10-06'], fxSettings({ meta_fx_mode: 'nbu' }), {}), { '2026-10-05': 44.9857, '2026-10-06': 45.1 });
+    });
   });
 }
 
