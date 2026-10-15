@@ -246,5 +246,9 @@ function fetchKeycrmOrders(from, to, settings, rules, existing) {
   orders.skipped = skipped;
   orders.cancelStatusWarnings = unexcludedCancelStatuses(statuses, settings);
   orders.rawCount = raws.length;
+  // Усі id, які повернув API (до фільтра за днем): замовлення з ordered_at ДО вікна теж існують і прибирати їх не можна
+  orders.rawIds = raws.map(function (r) {
+    return String(pickPath(r, KEYCRM_FIELDS.id));
+  });
   return orders;
 }

@@ -578,6 +578,24 @@ function suiteFlowRobust_(t) {
     t.eq(deps.store.read('KeyCRM_Orders').length, before, 'підозріло коротка відповідь');
     t.ok(deps.calls.logs.some(function (l) { return l.indexOf('підозрілою') !== -1; }));
   });
+  t.test('РЕГРЕС (реальний випадок 44366…): замовлення створене у вікні, але з ordered_at ДО вікна, існує в KeyCRM — його не можна прибирати', function () {
+    const deps = makeMemDeps_();
+    runDailyReportWith(deps, { send: false });
+    const rows = deps.store.read('KeyCRM_Orders');
+    rows.push(Object.assign({}, rows[0], { order_id: '777', created_at_kyiv: '2026-10-01 10:00:00', date: '2026-09-10' })); // дата до вікна 28.09…05.10
+    rows.push(Object.assign({}, rows[0], { order_id: '778', created_at_kyiv: '2026-10-01 11:00:00', date: '2026-10-01' })); // справді видалене
+    deps.store.write('KeyCRM_Orders', rows);
+    const orig = deps.fetchOrders;
+    deps.fetchOrders = function (f, to) {
+      const r = orig(f, to);
+      r.rawIds = r.map(function (o) { return o.order_id; }).concat(['777']); // API повернув 777 (дата поза вікном), але не 778
+      return r;
+    };
+    runDailyReportWith(deps, { send: false });
+    const ids = deps.store.read('KeyCRM_Orders').map(function (r) { return r.order_id; });
+    t.ok(ids.indexOf('777') !== -1, 'існуюче замовлення з датою до вікна збережено');
+    t.ok(ids.indexOf('778') === -1, 'видалене замовлення прибрано');
+  });
   t.test('staleOrderIds: враховує лише замовлення, створені у вікні; старіші й новіші не чіпає', function () {
     const rows = [
       { order_id: '1', created_at_kyiv: '2026-10-01 10:00:00' },
@@ -585,7 +603,7 @@ function suiteFlowRobust_(t) {
       { order_id: '3', created_at_kyiv: '2026-10-20 10:00:00' },
       { order_id: '4', created_at_kyiv: '2026-10-06 10:00:00' }
     ];
-    t.eq(staleOrderIds(rows, [{ order_id: '4' }], '2026-10-05', '2026-10-10'), { '2': true });
+    t.eq(staleOrderIds(rows, ['4'], '2026-10-05', '2026-10-10'), { '2': true });
   });
   t.test('акаунт Meta не в київській зоні -> попередження в Лог; київська або невідома — без попередження', function () {
     function logsFor(timezones) {

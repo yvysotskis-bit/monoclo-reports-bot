@@ -116,13 +116,15 @@ function rebuildCrmDaily_(store, dates) {
   store.write('CRM_Daily', replaceByDates(store.read('CRM_Daily'), rows, dates));
 }
 
-// Рядки KeyCRM_Orders, створені у вікні [from, to] (за Києвом), яких немає серед щойно завантажених замовлень:
-// замовлення видалили або в KeyCRM змінили його дату поза вікно. Без прибирання вони лишались би в CRM_Daily назавжди.
+// Рядки KeyCRM_Orders, створені у вікні [from, to] (за Києвом), яких API не повернув взагалі (keepIds — ВСІ id з відповіді):
+// замовлення видалили. Без прибирання вони лишались би в CRM_Daily назавжди.
+// УВАГА: порівнювати треба з усіма id відповіді, а не лише з замовленнями, чия дата (ordered_at) у вікні:
+// ordered_at може бути на тижні раніше за created_at, такі замовлення існують і видаляти їх не можна.
 // Повертає {order_id: true}.
-function staleOrderIds(existingRows, fetchedOrders, from, to) {
+function staleOrderIds(existingRows, keepIds, from, to) {
   const keep = {};
-  fetchedOrders.forEach(function (o) {
-    keep[String(o.order_id)] = true;
+  keepIds.forEach(function (id) {
+    keep[String(id)] = true;
   });
   const stale = {};
   existingRows.forEach(function (r) {
@@ -222,14 +224,17 @@ function collectData(deps, from, to) {
       }),
       SHEETS['KeyCRM_Orders'].keys
     );
-    const stale = staleOrderIds(existingRows, orders, from, to);
+    const fetchedIds = orders.rawIds || orders.map(function (o) {
+      return o.order_id;
+    });
+    const stale = staleOrderIds(existingRows, fetchedIds, from, to);
     const staleCount = Object.keys(stale).length;
     const inWindow = existingRows.filter(function (r) {
       const c = String(r.created_at_kyiv || '').slice(0, 10);
       return c >= from && c <= to;
     }).length;
     if (staleCount) {
-      if (!orders.length || (staleCount > 5 && staleCount > inWindow * 0.3)) {
+      if (!fetchedIds.length || (staleCount > 5 && staleCount > inWindow * 0.3)) {
         deps.log('WARN', 'KeyCRM: ' + staleCount + ' із ' + inWindow + ' замовлень вікна відсутні у відповіді API — вважаю відповідь підозрілою і нічого не прибираю');
       } else {
         merged = merged.filter(function (r) {
@@ -470,6 +475,11 @@ function backfill(days) {
 
 function backfill30() {
   return backfill(30);
+}
+
+// Глибше завантаження: замовлення з ordered_at на тиждень-два раніше за створення потрапляють лише у великі вікна
+function backfill60() {
+  return backfill(60);
 }
 
 function reclassifyOrders() {
