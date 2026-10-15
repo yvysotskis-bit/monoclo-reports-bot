@@ -599,6 +599,16 @@ function suiteFlowRobust_(t) {
     }
     t.eq(logsFor({ act_1: 'America/Los_Angeles' }).length, 1);
     t.eq(logsFor({ act_1: 'Europe/Kyiv', act_2: '' }).length, 0);
+    t.eq(logsFor({ act_1: 'Europe/Kiev' }).length, 0, 'Europe/Kiev — це та сама зона (реальна відповідь Meta)');
+  });
+  t.test('рядок про Meta в Лозі містить часові зони акаунтів (щоб відсутність зони було видно)', function () {
+    const deps = makeMemDeps_();
+    const orig = deps.fetchMeta;
+    deps.fetchMeta = function (f, to) {
+      return Object.assign({}, orig(f, to), { currencies: { act_1: 'USD' }, timezones: { act_1: '' } });
+    };
+    runDailyReportWith(deps, { send: false });
+    t.ok(deps.calls.logs.some(function (l) { return l.indexOf('Часові зони акаунтів: {"act_1":""}') !== -1; }));
   });
   t.test('часова зона акаунта: помилка запиту не ламає звіт (повертається порожній рядок)', function () {
     if (!inNode_()) return;

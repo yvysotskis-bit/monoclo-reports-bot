@@ -132,6 +132,11 @@ function staleOrderIds(existingRows, fetchedOrders, from, to) {
   return stale;
 }
 
+// Meta повертає старий псевдонім зони — Europe/Kiev (перевірено на реальних акаунтах); це та сама зона, що й Europe/Kyiv
+function isKyivZone_(tz) {
+  return ['Europe/Kyiv', 'Europe/Kiev'].indexOf(String(tz)) !== -1;
+}
+
 // Нове невідоме джерело: попередження в Лог і не частіше разу на добу — в алерт-чат
 function warnUnknownSources_(deps, orders) {
   const ids = {};
@@ -171,11 +176,11 @@ function collectData(deps, from, to) {
       })
     );
     deps.log('INFO', 'Meta: етап тривав ' + sec(t0));
-    deps.log('INFO', 'Meta: оновлено ' + m.days.length + ' дн. (' + from + '…' + to + '). Валюти акаунтів: ' + JSON.stringify(m.currencies || {}) + '. Direct-кампанії з витратами: ' + (m.directCampaigns.join(', ') || 'немає'));
+    deps.log('INFO', 'Meta: оновлено ' + m.days.length + ' дн. (' + from + '…' + to + '). Валюти акаунтів: ' + JSON.stringify(m.currencies || {}) + '. Часові зони акаунтів: ' + JSON.stringify(m.timezones || {}) + ' (порожньо = не вдалося визначити). Direct-кампанії з витратами: ' + (m.directCampaigns.join(', ') || 'немає'));
     if (m.fxFallback) deps.log('WARN', 'Курс НБУ недоступний — використано фіксований курс з налаштувань (meta_fx_fixed_rate)');
     Object.keys(m.timezones || {}).forEach(function (id) {
       const tz = m.timezones[id];
-      if (tz && tz !== KYIV_TZ) deps.log('WARN', 'Рекламний акаунт ' + id + ' працює в часовій зоні ' + tz + ', а звіт — за ' + KYIV_TZ + ': межі доби в Meta і KeyCRM можуть не збігатися');
+      if (tz && !isKyivZone_(tz)) deps.log('WARN', 'Рекламний акаунт ' + id + ' працює в часовій зоні ' + tz + ', а звіт — за ' + KYIV_TZ + ': межі доби в Meta і KeyCRM можуть не збігатися');
     });
     res.metaOk = true;
   } catch (e) {
