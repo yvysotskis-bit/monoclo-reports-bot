@@ -18,6 +18,7 @@ const DEFAULT_SETTINGS = [
   ['keycrm_source_quickorders_ids', '', 'ID джерела «Monoclo QuickOrders» (після discoverKeycrm)'],
   ['keycrm_source_instagram_ids', '', 'ID джерела «Інстаграм | Monoclo» (після discoverKeycrm)'],
   ['keycrm_excluded_status_ids', '', 'ID статусів, які НЕ рахуються замовленням (група «Скасовано»)'],
+  ['keycrm_count_zero_total_orders', false, 'TRUE — рахувати замовлення з сумою 0 (заміни, подарунки, замовлення, з яких прибрали товари); FALSE (дефолт) — не рахувати як продаж'],
   ['keycrm_source_other_ids', '', 'ID відомих сторонніх джерел (інші бренди, опт, дропшипінг) — про них не попереджати'],
   ['pixel_crm_diff_yellow_pct', 20, 'розбіжність піксель vs CRM: від цього % — 🟡'],
   ['pixel_crm_diff_red_pct', 40, 'розбіжність піксель vs CRM: від цього % — 🔴'],

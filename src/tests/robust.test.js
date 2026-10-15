@@ -302,6 +302,64 @@ function suiteKeycrmReal_(t) {
   });
 }
 
+function suiteZeroTotal_(t) {
+  const settings = fxSettings({ keycrm_source_site_ids: '212', keycrm_excluded_status_ids: '24,25' });
+  const rules = parseRuleRows(DEFAULT_UTM_RULES);
+  function norm(over, st) {
+    return normalizeOrder(
+      Object.assign({ id: 1, created_at: '2026-10-10T10:00:00.000000Z', source_id: 212, status_id: 9, grand_total: 999 }, over),
+      { settings: st || settings, rules: rules, statusNames: {} }
+    );
+  }
+  t.test('замовлення з сумою 0 не є продажем (реальні випадки 44963/45025), якщо не ввімкнено в налаштуваннях', function () {
+    t.eq(norm({ grand_total: 0 }).is_counted, false);
+    t.eq(norm({ grand_total: '0.00' }).is_counted, false);
+    t.eq(norm({ grand_total: null }).is_counted, false);
+    t.eq(norm({ grand_total: 999 }).is_counted, true);
+    t.eq(norm({ grand_total: 0 }, fxSettings({ keycrm_source_site_ids: '212', keycrm_count_zero_total_orders: true, keycrm_excluded_status_ids: '24' })).is_counted, true);
+  });
+  t.test('виключений статус не рахується навіть із ненульовою сумою; reclassify застосовує те саме правило', function () {
+    t.eq(norm({ status_id: 24, grand_total: 500 }).is_counted, false);
+    const rows = [norm({ id: 5, grand_total: 0 }), norm({ id: 6, grand_total: 700 })];
+    rows[0].is_counted = true; // як було б збережено старою логікою
+    const re = reclassifyRows(rows, rules, settings);
+    t.eq(re.map(function (r) { return r.is_counted; }), [false, true]);
+    t.eq(buildCrmDaily(re).reduce(function (a, r) { return a + r.orders; }, 0), 1);
+  });
+}
+
+function suiteStatuses_(t) {
+  // Реальна форма /order/status: id, name, group_id (скорочено)
+  const real = [
+    { id: 1, name: 'new', group_id: 1 }, { id: 21, name: 'Доставлено', group_id: 5 },
+    { id: 24, name: 'Повертається (в дорозі)', group_id: 6 }, { id: 25, name: 'Повернено', group_id: 6 }, { id: 99, name: 'Брак', group_id: 6 }
+  ];
+  t.test('статуси KeyCRM: група скасування визначається за group_id', function () {
+    const p = parseKeycrmStatuses(real);
+    t.eq(p.cancelIds, ['24', '25', '99']);
+    t.eq(p.names['21'], 'Доставлено');
+    t.eq(parseKeycrmStatuses([{ id: 1, name: 'x' }]).cancelIds, []); // без group_id — без хибних спрацювань
+  });
+  t.test('новий статус скасування, якого немає в налаштуваннях, потрапляє в попередження (раніше замовлення рахувались продажами мовчки)', function () {
+    const warn = unexcludedCancelStatuses(parseKeycrmStatuses(real), fxSettings({ keycrm_excluded_status_ids: '24,25' }));
+    t.eq(warn, ['99 Брак']);
+    t.eq(unexcludedCancelStatuses(parseKeycrmStatuses(real), fxSettings({ keycrm_excluded_status_ids: '24, 25, 99' })), []);
+  });
+  t.test('попередження про статуси доходить до Логу й алерта (раз на добу)', function () {
+    const deps = makeMemDeps_();
+    const orig = deps.fetchOrders;
+    deps.fetchOrders = function (f, to) {
+      const r = orig(f, to);
+      r.cancelStatusWarnings = ['99 Брак'];
+      return r;
+    };
+    runDailyReportWith(deps, { send: false });
+    runDailyReportWith(deps, { send: false });
+    t.eq(deps.calls.alerts.filter(function (a) { return a.indexOf('99 Брак') !== -1; }).length, 1);
+    t.ok(deps.calls.logs.some(function (l) { return l.indexOf('WARN') === 0 && l.indexOf('keycrm_excluded_status_ids') !== -1; }));
+  });
+}
+
 function suiteMergeRound_(t) {
   t.test('мультиакаунт: суми по датах без дробових "хвостів"; різні дати не змішуються', function () {
     const mk = function (date, spend, pv) {
@@ -455,6 +513,27 @@ function suiteFlowRobust_(t) {
     deps.now = function () { return new Date('2026-10-07T06:00:00Z'); };
     runDailyReportWith(deps, { send: true });
     t.eq(deps.calls.alerts.length, 2);
+  });
+  t.test('два різні алерти, що повторюються щодня, не чергуються: кожен надсилається раз на добу', function () {
+    const deps = makeMemDeps_();
+    for (let i = 0; i < 3; i++) {
+      alertSafe_(deps, 'Алерт A: Shopify недоступний');
+      alertSafe_(deps, 'Алерт B: невідоме джерело 182');
+    }
+    t.eq(deps.calls.alerts, ['Алерт A: Shopify недоступний', 'Алерт B: невідоме джерело 182']);
+    deps.now = function () { return new Date('2026-10-07T06:00:00Z'); };
+    alertSafe_(deps, 'Алерт A: Shopify недоступний');
+    t.eq(deps.calls.alerts.length, 3);
+  });
+  t.test('збій відправки алерта не блокує повторну спробу і не кидає виняток', function () {
+    const deps = makeMemDeps_();
+    let fail = true;
+    deps.alert = function (txt) { if (fail) throw new Error('Telegram 500'); deps.calls.alerts.push(txt); };
+    alertSafe_(deps, 'X');
+    t.eq(deps.calls.alerts.length, 0);
+    fail = false;
+    alertSafe_(deps, 'X');
+    t.eq(deps.calls.alerts, ['X']); // невдала відправка не позначається як надіслана
   });
   t.test('повторний запуск: звіт уже надіслано -> без звернень до API; не надіслано -> надсилає', function () {
     const deps = makeMemDeps_({ metaError: new Error('Meta API: HTTP 500') });

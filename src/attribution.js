@@ -149,6 +149,16 @@ function hasAnyUtm(utm) {
   });
 }
 
+// Чи рахується замовлення продажем: статус не з виключених і (за замовчуванням) сума > 0.
+// Замовлення з сумою 0 — заміни, подарунки, замовлення, з яких прибрали всі товари (на реальних даних 08.10 і 10.10) —
+// завищували кількість замовлень і занижували CPA.
+function isCountedOrder_(statusId, grandTotal, settings) {
+  const excluded = settingList(settings, 'keycrm_excluded_status_ids');
+  if (excluded.indexOf(String(statusId)) !== -1) return false;
+  if (!settingBool(settings, 'keycrm_count_zero_total_orders') && !(Number(grandTotal) > 0)) return false;
+  return true;
+}
+
 // Агрегат CRM_Daily: дата × source_group × channel, лише is_counted (розділ 2)
 function buildCrmDaily(orders, dates) {
   const set = dates
@@ -188,14 +198,13 @@ function toBool(v) {
 // Перерахунок для вже збережених замовлень (reclassifyOrders) — без запитів до API:
 // channel (за правилами), а також source_group і is_counted (за поточними налаштуваннями)
 function reclassifyRows(orders, rules, settings) {
-  const excluded = settingList(settings, 'keycrm_excluded_status_ids');
   return orders.map(function (o) {
     const copy = {};
     Object.keys(o).forEach(function (k) {
       copy[k] = o[k];
     });
     copy.source_group = classifySource(o.source_id, settings);
-    copy.is_counted = excluded.indexOf(String(o.status_id)) === -1;
+    copy.is_counted = isCountedOrder_(o.status_id, o.grand_total, settings);
     copy.channel = classifyChannel(copy.source_group, o, rules);
     return copy;
   });

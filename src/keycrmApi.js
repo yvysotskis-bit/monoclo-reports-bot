@@ -98,7 +98,6 @@ function normalizeOrder(raw, ctx) {
   const sourceId = String(pickPath(raw, F.sourceId));
   const statusId = String(pickPath(raw, F.statusId));
   const sourceGroup = classifySource(sourceId, ctx.settings);
-  const excluded = settingList(ctx.settings, 'keycrm_excluded_status_ids');
 
   return {
     order_id: String(pickPath(raw, F.id)),
@@ -108,7 +107,7 @@ function normalizeOrder(raw, ctx) {
     source_group: sourceGroup,
     status_id: statusId,
     status_name: (ctx.statusNames && ctx.statusNames[statusId]) || '',
-    is_counted: excluded.indexOf(statusId) === -1,
+    is_counted: isCountedOrder_(statusId, pickPath(raw, F.grandTotal), ctx.settings),
     grand_total: Number(pickPath(raw, F.grandTotal)) || 0,
     utm_source: utm.utm_source,
     utm_medium: utm.utm_medium,
@@ -186,19 +185,40 @@ function fetchKeycrmRawOrders(from, to, settings) {
   return keycrmGetAll(KEYCRM_ENDPOINTS.orders, params);
 }
 
-function fetchKeycrmStatusNames_() {
-  const map = {};
-  keycrmGetAll(KEYCRM_ENDPOINTS.statuses, {}).forEach(function (s) {
-    map[String(s.id)] = s.name || '';
+// У KeyCRM статуси мають group_id; на реальному /order/status група 6 містить усі статуси скасування й повернення
+// (canceled, incorrect_data, underbid, not_available, «Повертається», «Повернено», «Утилізація», «Повернуто кошти»).
+const KEYCRM_CANCEL_GROUP_ID = 6;
+
+// Чисте: статуси -> {names: {id: name}, cancelIds: [id...]}
+function parseKeycrmStatuses(list) {
+  const names = {};
+  const cancelIds = [];
+  (list || []).forEach(function (s) {
+    names[String(s.id)] = s.name || '';
+    if (Number(s.group_id) === KEYCRM_CANCEL_GROUP_ID) cancelIds.push(String(s.id));
   });
-  return map;
+  return { names: names, cancelIds: cancelIds };
+}
+
+// Чисте: статуси групи скасування, яких немає в keycrm_excluded_status_ids -> ["24 Повертається", ...].
+// Такі замовлення рахувались би як продажі, поки статус не додадуть у налаштування.
+function unexcludedCancelStatuses(parsed, settings) {
+  const excluded = settingList(settings, 'keycrm_excluded_status_ids');
+  return parsed.cancelIds
+    .filter(function (id) {
+      return excluded.indexOf(id) === -1;
+    })
+    .map(function (id) {
+      return id + ' ' + parsed.names[id];
+    });
 }
 
 // Нормалізовані замовлення в межах [from, to] за Києвом.
 // existing — {order_id: рядок KeyCRM_Orders} (щоб не питати Shopify повторно про вже знайдені мітки).
 // Помилка резерву Shopify не валить завантаження: вона лишається у властивості результату .shopifyError.
 function fetchKeycrmOrders(from, to, settings, rules, existing) {
-  const statusNames = fetchKeycrmStatusNames_();
+  const statuses = parseKeycrmStatuses(keycrmGetAll(KEYCRM_ENDPOINTS.statuses, {}));
+  const statusNames = statuses.names;
   const raws = fetchKeycrmRawOrders(from, to, settings);
   let fallback = null;
   let shopifyError = '';
@@ -224,6 +244,7 @@ function fetchKeycrmOrders(from, to, settings, rules, existing) {
   });
   orders.shopifyError = shopifyError;
   orders.skipped = skipped;
+  orders.cancelStatusWarnings = unexcludedCancelStatuses(statuses, settings);
   orders.rawCount = raws.length;
   return orders;
 }

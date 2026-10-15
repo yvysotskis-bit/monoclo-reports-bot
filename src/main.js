@@ -11,6 +11,9 @@ const TRIGGERS = [
 ];
 
 const LOCK_WAIT_MS = 90000;
+// Якщо KeyCRM недоступний, а Meta працює, ранковий звіт не надсилається без блоку CRM одразу: повторні запуски
+// (11:00, 14:00) ще можуть його отримати. З цієї години (Київ) звіт надсилається в будь-якому разі (ТЗ, розділ 9).
+const CRM_WAIT_UNTIL_HOUR = 14;
 
 const LOG_MAX_ROWS = 5000;
 
@@ -75,16 +78,34 @@ function metaAlertText_(e) {
   return base;
 }
 
-// Той самий алерт не повторюється протягом доби (інакше тригери 9:00/11:00/14:00 і ручні запуски засипали б чат)
+// Короткий хеш тексту (djb2) для журналу відправлених алертів
+function hashText_(text) {
+  let h = 5381;
+  const s = String(text);
+  for (let i = 0; i < s.length; i++) h = ((h << 5) + h + s.charCodeAt(i)) | 0;
+  return (h >>> 0).toString(36);
+}
+
+// Той самий алерт не повторюється протягом доби (інакше тригери 9:00/11:00/14:00 і ручні запуски засипали б чат).
+// Пам'ятаємо ВСІ алерти доби, а не лише останній: інакше два різні алерти, що повторюються щодня, чергувались би.
 function alertSafe_(deps, text) {
   try {
-    const sig = dateInTz(deps.now(), KYIV_TZ) + '|' + String(text).slice(0, 300);
-    if (deps.state.get('last_alert') === sig) {
+    const today = dateInTz(deps.now(), KYIV_TZ);
+    const h = hashText_(String(text).slice(0, 300));
+    let seen = { d: today, h: [] };
+    try {
+      const raw = JSON.parse(deps.state.get('alerts_sent') || 'null');
+      if (raw && raw.d === today && Array.isArray(raw.h)) seen = raw;
+    } catch (e) {
+      // пошкоджений запис — починаємо день заново
+    }
+    if (seen.h.indexOf(h) !== -1) {
       deps.log('INFO', 'Алерт не повторено (сьогодні вже надсилався): ' + String(text).slice(0, 100));
       return;
     }
     deps.alert(text);
-    deps.state.set('last_alert', sig);
+    seen.h.push(h);
+    deps.state.set('alerts_sent', JSON.stringify({ d: today, h: seen.h.slice(-30) }));
   } catch (e) {
     deps.log('ERROR', 'Не вдалося надіслати алерт: ' + errText_(e));
   }
@@ -181,6 +202,11 @@ function collectData(deps, from, to) {
       deps.log('WARN', 'Shopify (резерв UTM) недоступний: ' + orders.shopifyError);
       alertSafe_(deps, '⚠️ Резерв UTM із Shopify недоступний: ' + orders.shopifyError);
     }
+    if (orders.cancelStatusWarnings && orders.cancelStatusWarnings.length) {
+      const m = 'Статуси скасування/повернення KeyCRM не виключені з підрахунку: ' + orders.cancelStatusWarnings.join('; ') + '. Додайте їх ID у «Налаштування» → keycrm_excluded_status_ids, інакше такі замовлення рахуються продажами.';
+      deps.log('WARN', m);
+      alertSafe_(deps, '⚠️ ' + m);
+    }
     if (orders.skipped && orders.skipped.length) {
       deps.log('WARN', 'KeyCRM: пропущено ' + orders.skipped.length + ' замовл. через помилку даних: ' + orders.skipped.slice(0, 3).join(' | '));
     }
@@ -215,7 +241,7 @@ function collectData(deps, from, to) {
     res.crmOk = true;
   } catch (e) {
     deps.log('ERROR', 'KeyCRM: ' + errText_(e));
-    alertSafe_(deps, '🚨 KeyCRM недоступний, звіт надіслано без даних CRM: ' + errText_(e));
+    alertSafe_(deps, '🚨 KeyCRM недоступний: ' + errText_(e) + '. Звіт чекає на відновлення (повтор о 11:00); о 14:00 піде в будь-якому разі — без блоку CRM.');
   }
   return res;
 }
@@ -306,8 +332,13 @@ function runDailyReportInner_(deps, opts) {
   const res = collectData(deps, addDays(date, -7), date);
   if (!res.metaOk) return { status: 'meta_failed', date: date };
   buildDailyReportWith(deps, date, { crmAvailable: res.crmOk });
-  if (opts.send) sendReportFromSheetWith(deps, date, {});
   trimLog(deps.store, LOG_MAX_ROWS);
+  const hour = Number(dateTimeInTz(deps.now(), KYIV_TZ).slice(11, 13));
+  if (opts.send && !res.crmOk && hour < CRM_WAIT_UNTIL_HOUR) {
+    deps.log('WARN', 'KeyCRM недоступний: звіт за ' + date + ' збережено в листі, але не надіслано — чекаю на відновлення (повторні запуски; з ' + CRM_WAIT_UNTIL_HOUR + ':00 піде без блоку CRM)');
+    return { status: 'crm_wait', date: date, crmOk: false };
+  }
+  if (opts.send) sendReportFromSheetWith(deps, date, {});
   return { status: 'ok', date: date, crmOk: res.crmOk };
 }
 

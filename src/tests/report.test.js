@@ -158,16 +158,33 @@ function suiteFlow_(t) {
       });
     });
   });
-  t.test('KeyCRM недоступний: звіт відправлено з «дані KeyCRM недоступні» і надіслано алерт', function () {
+  t.test('KeyCRM недоступний: до 14:00 звіт чекає (не надсилається без CRM), після 14:00 надсилається з «дані KeyCRM недоступні»; алерт один', function () {
     const deps = makeMemDeps_({ crmError: new Error('KeyCRM API: HTTP 500') });
     const r = runDailyReportWith(deps, { send: true });
-    t.eq(r.status, 'ok');
-    t.eq(r.crmOk, false);
+    t.eq(r.status, 'crm_wait');
+    t.eq(deps.calls.send.length, 0);
+    t.eq(deps.store.read('Звіт_Щодня')[0].status, 'ready');
+    t.eq(runDailyReportRetryWith(deps).status, 'crm_wait'); // 11:00 теж ще чекає
+    deps.now = function () { return new Date('2026-10-06T11:10:00Z'); }; // 14:10 Київ
+    const r2 = runDailyReportRetryWith(deps);
+    t.eq(r2.status, 'ok');
+    t.eq(r2.crmOk, false);
     t.eq(deps.calls.send.length, 1);
     t.ok(deps.calls.send[0].text.indexOf('дані KeyCRM недоступні') !== -1);
     t.ok(deps.calls.send[0].text.indexOf('Нових розмов: 46') !== -1);
     t.eq(deps.calls.alerts.length, 1);
     t.ok(deps.calls.alerts[0].indexOf('KeyCRM') !== -1);
+  });
+  t.test('KeyCRM відновився між запусками: повний звіт із CRM надсилається раз', function () {
+    const deps = makeMemDeps_({ crmError: new Error('KeyCRM API: HTTP 500') });
+    t.eq(runDailyReportWith(deps, { send: true }).status, 'crm_wait');
+    const good = makeMemDeps_();
+    deps.fetchOrders = good.fetchOrders;
+    deps.now = function () { return new Date('2026-10-06T08:05:00Z'); }; // 11:05 Київ
+    t.eq(runDailyReportRetryWith(deps).status, 'ok');
+    t.eq(deps.calls.send.length, 1);
+    t.ok(deps.calls.send[0].text.indexOf('дані KeyCRM недоступні') === -1);
+    t.eq(runDailyReportRetryWith(deps).status, 'already_sent');
   });
   t.test('ID джерел KeyCRM не задано: у звіті «дані KeyCRM недоступні» замість хибних нулів', function () {
     const deps = makeMemDeps_({ settings: fxSettings({ keycrm_source_site_ids: '', keycrm_source_quickorders_ids: '', keycrm_source_instagram_ids: '' }) });
