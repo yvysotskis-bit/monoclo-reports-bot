@@ -336,6 +336,11 @@ function suiteMetaGuard_(t) {
     t.eq(findInconsistentMetaDays([idle]), []);
     t.eq(findInconsistentMetaDays([Object.assign({}, zeroDay, { spend: 4100, impressions: 30000 })]), []);
   });
+  t.test('РЕГРЕС 21.10: день без витрат і кліків, але з подіями (конверсії зараховано на цей день) — не суперечність', function () {
+    const noSpendButEvents = { date: '2026-10-19', spend: 0, impressions: 0, reach: 0, link_clicks: 0, view_content: 0, add_to_cart: 0, initiate_checkout: 0, purchases: 1, purchase_value: 1200, conversations_started: 2, first_replies: 1, direct_spend: 0 };
+    t.eq(findInconsistentMetaDays([noSpendButEvents]), []);
+    t.eq(findInconsistentMetaDays([Object.assign({}, noSpendButEvents, { direct_spend: 120 })]), ['2026-10-19']);
+  });
   t.test('Meta повернула нулі при кліках: помилка Meta, таблиця не затирається, звіт не надсилається, алерт з підказкою', function () {
     const deps = makeMemDeps_();
     runDailyReportWith(deps, { send: false });
