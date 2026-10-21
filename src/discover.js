@@ -517,21 +517,23 @@ function checkSpend() {
     { fields: 'spend,inline_link_clicks', noAttributionParam: true },
     { fields: 'spend,impressions,reach', noAttributionParam: true },
     { fields: 'reach', noAttributionParam: true },
+    { fields: 'reach', noAttributionParam: false, noIncrement: true, singleDay: true },
+    { fields: 'reach,impressions,spend', noAttributionParam: false, noIncrement: true, singleDay: true },
     { fields: 'spend,impressions,reach,inline_link_clicks,actions,action_values', noAttributionParam: true }
   ];
   const rows = [];
   getMetaAccountIds().forEach(function (id) {
     variants.forEach(function (v) {
-      const label = v.fields + (v.noAttributionParam ? ' [БЕЗ use_account_attribution_setting]' : ' [з параметром]');
+      const label = v.fields + (v.noAttributionParam ? ' [БЕЗ use_account_attribution_setting]' : ' [з параметром]') + (v.noIncrement ? ' [БЕЗ time_increment, один день ' + to + ']' : '');
       try {
-        const out = fetchInsights({ accountId: id, level: 'account', since: from, until: to, fields: v.fields, noAttributionParam: v.noAttributionParam });
+        const out = fetchInsights({ accountId: id, level: 'account', since: v.singleDay ? to : from, until: to, fields: v.fields, noAttributionParam: v.noAttributionParam, noIncrement: !!v.noIncrement });
         rows.push([
           'набір',
           id,
           label,
           out
             .map(function (r) {
-              return r.date_start + ': spend=' + r.spend + ' impr=' + r.impressions + ' reach=' + r.reach + ' clicks=' + r.inline_link_clicks;
+              return (r.date_start || 'агрегат') + ': spend=' + r.spend + ' impr=' + r.impressions + ' reach=' + r.reach + ' clicks=' + r.inline_link_clicks;
             })
             .join(' | ') || '(порожньо)',
           '',

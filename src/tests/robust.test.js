@@ -426,6 +426,59 @@ function suiteMetaSplit_(t) {
   });
 }
 
+function suiteReachFallback_(t) {
+  if (!inNode_()) return;
+  function run(reachAnswer) {
+    const asked = [];
+    let res;
+    withGlobals_(
+      {
+        fetchInsights: function (o) {
+          asked.push(o.level + ':' + o.fields + (o.noIncrement ? ':агрегат' : ''));
+          if (o.level !== 'account') return [];
+          if (o.noIncrement) return reachAnswer === 'none' ? [{ date_start: '2026-10-13' }] : [{ date_start: '2026-10-13', reach: reachAnswer }];
+          if (o.fields === 'spend,impressions,reach') return [{ date_start: '2026-10-13', spend: '100', impressions: '9000' }]; // reach не віддано
+          return [];
+        },
+        fetchCampaignAdsets_: function () { return []; },
+        fetchAccountCurrency_: function () { return 'UAH'; },
+        fetchAccountTimezone_: function () { return 'Europe/Kyiv'; }
+      },
+      function () {
+        res = fetchMetaAccountDays_('act_1', '2026-10-13', '2026-10-13', fxSettings(), {}, { yes: {}, no: {} });
+      }
+    );
+    return { res: res, asked: asked };
+  }
+  t.test('охоплення: якщо щоденний запит його не віддав, береться агрегований запит за звітний день', function () {
+    const r = run('7000');
+    t.eq(r.res.days[0].reach, 7000);
+    t.ok(r.asked.indexOf('account:reach:агрегат') !== -1);
+  });
+  t.test('охоплення: якщо Meta не віддає і агрегат — лишається 0 (у звіті «—»), без помилки', function () {
+    t.eq(run('none').res.days[0].reach, 0);
+  });
+  t.test('охоплення: якщо щоденний запит віддав reach — додаткового запиту немає', function () {
+    const asked = [];
+    withGlobals_(
+      {
+        fetchInsights: function (o) {
+          asked.push(o.fields + (o.noIncrement ? ':агрегат' : ''));
+          return o.level === 'account' && o.fields === 'spend,impressions,reach' ? [{ date_start: '2026-10-13', spend: '100', impressions: '9000', reach: '7000' }] : [];
+        },
+        fetchCampaignAdsets_: function () { return []; },
+        fetchAccountCurrency_: function () { return 'UAH'; },
+        fetchAccountTimezone_: function () { return 'Europe/Kyiv'; }
+      },
+      function () {
+        const r = fetchMetaAccountDays_('act_1', '2026-10-13', '2026-10-13', fxSettings(), {}, { yes: {}, no: {} });
+        t.eq(r.days[0].reach, 7000);
+      }
+    );
+    t.eq(asked.filter(function (a) { return a.indexOf('агрегат') !== -1; }), []);
+  });
+}
+
 function suiteStatuses_(t) {
   // Реальна форма /order/status: id, name, group_id (скорочено)
   const real = [

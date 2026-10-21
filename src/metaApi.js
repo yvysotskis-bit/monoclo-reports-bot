@@ -85,11 +85,11 @@ function fetchInsights(opts) {
   const params = {
     level: opts.level,
     time_range: JSON.stringify({ since: opts.since, until: opts.until }),
-    time_increment: 1,
     fields: opts.fields,
     limit: 500,
     use_account_attribution_setting: 'true'
   };
+  if (!opts.noIncrement) params.time_increment = 1; // без розбивки за днями — одна агрегована відповідь за весь період
   if (opts.noAttributionParam) delete params.use_account_attribution_setting; // лише для діагностики checkSpend
   if (opts.breakdowns) params.breakdowns = opts.breakdowns;
   return metaGetAll('/' + opts.accountId + '/insights', params);
@@ -416,6 +416,19 @@ function fetchAccountTimezone_(accountId) {
   }
 }
 
+// Охоплення за звітний день окремим запитом БЕЗ щоденної розбивки: 21.10.2026 Meta перестала віддавати reach у запитах
+// із time_increment = 1 (діагностика checkSpend), тож спробуємо агрегований запит за один день. Best-effort:
+// якщо поля немає — лишаємо як є (у звіті «—»). Повертає число або null.
+function fetchReachForDay_(accountId, day) {
+  try {
+    const rows = fetchInsights({ accountId: accountId, level: 'account', since: day, until: day, fields: 'reach', noIncrement: true });
+    const v = rows && rows[0] && rows[0].reach;
+    return v !== undefined && v !== null && Number(v) >= 0 ? Number(v) : null;
+  } catch (e) {
+    return null;
+  }
+}
+
 // Один акаунт: {days (у UAH), directCampaigns (з витратами за період), currency, timezone}
 function fetchMetaAccountDays_(accountId, from, to, settings, fxCache, dirCache) {
   const accountRows = mergeInsightRowSets(
@@ -439,6 +452,18 @@ function fetchMetaAccountDays_(accountId, from, to, settings, fxCache, dirCache)
   const currency = fetchAccountCurrency_(accountId);
   const timezone = fetchAccountTimezone_(accountId);
   const days = assembleMetaDays(accountRows, campaignRows, directIds, from, to);
+  // охоплення за останній день, якщо щоденний запит його не віддав
+  const lastRow = accountRows.filter(function (r) {
+    return r.date_start === to && Number(r.spend) > 0 && r.reach === undefined;
+  })[0];
+  if (lastRow) {
+    const reach = fetchReachForDay_(accountId, to);
+    if (reach !== null) {
+      days.forEach(function (d) {
+        if (d.date === to) d.reach = reach;
+      });
+    }
+  }
   const inconsistent = findInconsistentMetaDays(days);
   if (inconsistent.length) {
     const e = new Error('Meta повернула суперечливі дані: витрати й покази = 0, але є кліки/події за ' + inconsistent.length + ' дн. (' + inconsistent.slice(0, 8).join(', ') + ')');
