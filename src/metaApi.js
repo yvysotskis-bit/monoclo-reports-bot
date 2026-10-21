@@ -102,12 +102,19 @@ const META_CAMPAIGN_FIELDS = 'campaign_id,spend'; // actions і назва не 
 
 // ---- чисті допоміжні ----
 
-// Склеює рядки кількох запитів Insights за date_start: {date_start: об'єднаний рядок}, відсортовано за датою
+// Склеює рядки кількох запитів Insights за date_start. З кожного запиту береться ЛИШЕ те, що в ньому просили:
+// 21.10.2026 запит із inline_link_clicks або actions повертав spend = 0 і impressions = 0 (діагностика checkSpend),
+// тож чужі поля з відповіді не можна переносити — вони затерли б правильні витрати з простого запиту.
+// sets: [{fields: 'spend,impressions,reach', rows: [...]}, ...] -> рядки за датою (відсортовано)
 function mergeInsightRowSets(sets) {
   const byDate = {};
-  sets.forEach(function (rows) {
-    rows.forEach(function (r) {
-      byDate[r.date_start] = Object.assign(byDate[r.date_start] || {}, r);
+  sets.forEach(function (set) {
+    const keys = String(set.fields).split(',');
+    set.rows.forEach(function (r) {
+      const acc = byDate[r.date_start] || (byDate[r.date_start] = { date_start: r.date_start });
+      keys.forEach(function (k) {
+        if (r[k] !== undefined) acc[k] = r[k];
+      });
     });
   });
   return Object.keys(byDate)
@@ -413,7 +420,7 @@ function fetchAccountTimezone_(accountId) {
 function fetchMetaAccountDays_(accountId, from, to, settings, fxCache, dirCache) {
   const accountRows = mergeInsightRowSets(
     META_ACCOUNT_FIELD_SETS.map(function (fields) {
-      return fetchInsights({ accountId: accountId, level: 'account', since: from, until: to, fields: fields });
+      return { fields: fields, rows: fetchInsights({ accountId: accountId, level: 'account', since: from, until: to, fields: fields }) };
     })
   );
   const campaignRows = fetchInsights({ accountId: accountId, level: 'campaign', since: from, until: to, fields: META_CAMPAIGN_FIELDS });

@@ -374,19 +374,27 @@ function suiteMetaGuard_(t) {
 }
 
 function suiteMetaSplit_(t) {
-  t.test('склеювання окремих запитів Insights за датою: поля не губляться, порядок за датою', function () {
+  t.test('склеювання запитів Insights: з кожного береться лише те, що просили (реальна відповідь Meta 21.10: клікові запити мають spend = 0)', function () {
     const merged = mergeInsightRowSets([
-      [{ date_start: '2026-10-19', spend: '49.18', impressions: '9605' }, { date_start: '2026-10-18', spend: '59.98', impressions: '14529' }],
-      [{ date_start: '2026-10-18', inline_link_clicks: '59' }, { date_start: '2026-10-19', inline_link_clicks: '36' }],
-      [{ date_start: '2026-10-18', actions: [{ action_type: 'offsite_conversion.fb_pixel_purchase', value: '2' }] }]
+      { fields: 'spend,impressions,reach', rows: [{ date_start: '2026-10-19', spend: '49.18', impressions: '9605' }, { date_start: '2026-10-18', spend: '59.98', impressions: '14529' }] },
+      { fields: 'inline_link_clicks', rows: [{ date_start: '2026-10-18', spend: '0', impressions: '0', inline_link_clicks: '59' }, { date_start: '2026-10-19', spend: '0', impressions: '0', inline_link_clicks: '36' }] },
+      { fields: 'actions,action_values', rows: [{ date_start: '2026-10-18', spend: '0', actions: [{ action_type: 'offsite_conversion.fb_pixel_purchase', value: '2' }] }] }
     ]);
     t.eq(merged.map(function (r) { return r.date_start; }), ['2026-10-18', '2026-10-19']);
-    t.eq(merged[0].spend, '59.98');
+    t.eq(merged[0].spend, '59.98', 'нулі з клікового запиту не затирають витрати');
+    t.eq(merged[0].impressions, '14529');
     t.eq(merged[0].inline_link_clicks, '59');
-    t.eq(merged[0].actions.length, 1);
     t.eq(merged[1].actions, undefined);
     const m = mapInsightRow(merged[0]);
-    t.eq([m.spend, m.impressions, m.link_clicks, m.purchases], [59.98, 14529, 59, 2]);
+    t.eq([m.spend, m.impressions, m.link_clicks, m.purchases, m.reach], [59.98, 14529, 59, 2, 0]);
+    t.eq(findInconsistentMetaDays([m]), []);
+  });
+  t.test('звіт: коли Meta не віддала охоплення, у тексті «Охоплення: —», а не 0', function () {
+    const rows = fxMetaRows();
+    rows[rows.length - 1].reach = 0;
+    const text = buildMetaMsg1(computeReport(FX_DATE, rows, buildCrmDaily(fxOrders())), fxSettings());
+    t.ok(text.indexOf('Охоплення: —') !== -1);
+    t.ok(text.indexOf('Частота акаунта: —') !== -1);
   });
   if (!inNode_()) return;
   t.test('fetchMetaAccountDays_ запитує поля окремими простими запитами, а не одним великим', function () {
@@ -397,8 +405,8 @@ function suiteMetaSplit_(t) {
           asked.push(o.level + ':' + o.fields);
           if (o.level !== 'account') return [];
           if (o.fields === 'spend,impressions,reach') return [{ date_start: '2026-10-13', spend: '100', impressions: '9000', reach: '7000' }];
-          if (o.fields === 'inline_link_clicks') return [{ date_start: '2026-10-13', inline_link_clicks: '50' }];
-          return [{ date_start: '2026-10-13', actions: [{ action_type: 'offsite_conversion.fb_pixel_purchase', value: '1' }], action_values: [{ action_type: 'offsite_conversion.fb_pixel_purchase', value: '1000' }] }];
+          if (o.fields === 'inline_link_clicks') return [{ date_start: '2026-10-13', spend: '0', impressions: '0', inline_link_clicks: '50' }];
+          return [{ date_start: '2026-10-13', spend: '0', actions: [{ action_type: 'offsite_conversion.fb_pixel_purchase', value: '1' }], action_values: [{ action_type: 'offsite_conversion.fb_pixel_purchase', value: '1000' }] }];
         },
         fetchCampaignAdsets_: function () { return []; },
         fetchAccountCurrency_: function () { return 'UAH'; },

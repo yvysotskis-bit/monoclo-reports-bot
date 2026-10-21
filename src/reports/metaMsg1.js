@@ -42,7 +42,7 @@ function buildMetaMsg1(data, settings) {
       trendArrow(d.spend, a.spend, trend)
     )
   );
-  L.push('Показів: ' + fmtInt(d.impressions) + ' · Охоплення: ' + fmtInt(d.reach));
+  L.push('Показів: ' + fmtInt(d.impressions) + ' · Охоплення: ' + (d.reach > 0 ? fmtInt(d.reach) : DASH)); // Meta інколи не віддає reach — тоді «—», а не хибний 0
   L.push(
     withIcon_(
       'Частота акаунта: ' + fmtFreq(d.freq),
