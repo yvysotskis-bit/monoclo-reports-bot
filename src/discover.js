@@ -503,39 +503,42 @@ function checkPurchases() {
   console.log('checkPurchases: результат у листі «Discover»');
 }
 
-// Діагностика витрат Meta: той самий день різними наборами полів. Якщо в якомусь наборі spend = 0, а в інших нормальний —
-// саме цей набір ламає відповідь (так було 21.10.2026). Результат — лист «Discover». Запуск: checkSpend().
+// Діагностика витрат і охоплення Meta: той самий день різними наборами полів, з параметром use_account_attribution_setting
+// і без нього. Якщо в якомусь наборі spend = 0 або reach порожній, а в інших нормально — цей набір/параметр ламає
+// відповідь (так було 21.10.2026). Результат — лист «Discover». Запуск: checkSpend().
 function checkSpend() {
   const deps = defaultDeps();
   const to = yesterday_(deps);
   const from = addDays(to, -2);
-  const sets = [
-    'spend',
-    'spend,impressions',
-    'spend,reach',
-    'spend,inline_link_clicks',
-    'spend,actions',
-    'spend,impressions,reach,inline_link_clicks,actions,action_values'
+  const variants = [
+    { fields: 'spend,impressions,reach', noAttributionParam: false },
+    { fields: 'reach', noAttributionParam: false },
+    { fields: 'spend,inline_link_clicks', noAttributionParam: false },
+    { fields: 'spend,inline_link_clicks', noAttributionParam: true },
+    { fields: 'spend,impressions,reach', noAttributionParam: true },
+    { fields: 'reach', noAttributionParam: true },
+    { fields: 'spend,impressions,reach,inline_link_clicks,actions,action_values', noAttributionParam: true }
   ];
   const rows = [];
   getMetaAccountIds().forEach(function (id) {
-    sets.forEach(function (fields) {
+    variants.forEach(function (v) {
+      const label = v.fields + (v.noAttributionParam ? ' [БЕЗ use_account_attribution_setting]' : ' [з параметром]');
       try {
-        const out = fetchInsights({ accountId: id, level: 'account', since: from, until: to, fields: fields });
+        const out = fetchInsights({ accountId: id, level: 'account', since: from, until: to, fields: v.fields, noAttributionParam: v.noAttributionParam });
         rows.push([
           'набір',
           id,
-          fields,
+          label,
           out
             .map(function (r) {
-              return r.date_start + ': spend=' + r.spend + (r.impressions !== undefined ? ' impr=' + r.impressions : '') + (r.reach !== undefined ? ' reach=' + r.reach : '') + (r.inline_link_clicks !== undefined ? ' clicks=' + r.inline_link_clicks : '');
+              return r.date_start + ': spend=' + r.spend + ' impr=' + r.impressions + ' reach=' + r.reach + ' clicks=' + r.inline_link_clicks;
             })
             .join(' | ') || '(порожньо)',
           '',
           ''
         ]);
       } catch (e) {
-        rows.push(['набір', id, fields, 'ПОМИЛКА ' + errText_(e), '', '']);
+        rows.push(['набір', id, label, 'ПОМИЛКА ' + errText_(e), '', '']);
       }
     });
   });

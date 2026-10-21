@@ -90,6 +90,7 @@ function fetchInsights(opts) {
     limit: 500,
     use_account_attribution_setting: 'true'
   };
+  if (opts.noAttributionParam) delete params.use_account_attribution_setting; // лише для діагностики checkSpend
   if (opts.breakdowns) params.breakdowns = opts.breakdowns;
   return metaGetAll('/' + opts.accountId + '/insights', params);
 }
