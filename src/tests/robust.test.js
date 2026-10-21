@@ -328,6 +328,51 @@ function suiteZeroTotal_(t) {
   });
 }
 
+function suiteMetaGuard_(t) {
+  const zeroDay = { date: '2026-10-13', spend: 0, impressions: 0, reach: 0, link_clicks: 301, view_content: 338, add_to_cart: 14, initiate_checkout: 4, purchases: 4, purchase_value: 7577.9, conversations_started: 14, first_replies: 10, direct_spend: 3412.66 };
+  t.test('суперечливі дні: реальний випадок 13–20.10 (spend/покази 0 при кліках) виявляється; справжній день без реклами — ні', function () {
+    t.eq(findInconsistentMetaDays([zeroDay]), ['2026-10-13']);
+    const idle = { date: '2026-10-14', spend: 0, impressions: 0, reach: 0, link_clicks: 0, view_content: 0, add_to_cart: 0, initiate_checkout: 0, purchases: 0, purchase_value: 0, conversations_started: 0, first_replies: 0, direct_spend: 0 };
+    t.eq(findInconsistentMetaDays([idle]), []);
+    t.eq(findInconsistentMetaDays([Object.assign({}, zeroDay, { spend: 4100, impressions: 30000 })]), []);
+  });
+  t.test('Meta повернула нулі при кліках: помилка Meta, таблиця не затирається, звіт не надсилається, алерт з підказкою', function () {
+    const deps = makeMemDeps_();
+    runDailyReportWith(deps, { send: false });
+    const before = JSON.stringify(deps.store.read('Meta_Daily'));
+    const e = new Error('Meta повернула суперечливі дані: …');
+    e.metaInconsistent = true;
+    deps.fetchMeta = function () { throw e; };
+    deps.now = function () { return new Date('2026-10-07T06:00:00Z'); };
+    const r = runDailyReportWith(deps, { send: true });
+    t.eq(r.status, 'meta_failed');
+    t.eq(JSON.stringify(deps.store.read('Meta_Daily')), before, 'Meta_Daily не змінено');
+    t.eq(deps.calls.send.length, 0);
+    t.ok(deps.calls.alerts[0].indexOf('Ads Manager') !== -1);
+  });
+  if (!inNode_()) return;
+  t.test('fetchMetaAccountDays_: відповідь Meta з нулями при кліках -> помилка; нормальна відповідь проходить', function () {
+    function run(accountRow) {
+      return withGlobals_(
+        {
+          fetchInsights: function (o) { return o.level === 'account' ? [accountRow] : [{ campaign_id: '1', date_start: '2026-10-13', spend: '10' }]; },
+          fetchCampaignAdsets_: function () { return [{ destination_type: 'WEBSITE' }]; },
+          fetchAccountCurrency_: function () { return 'UAH'; },
+          fetchAccountTimezone_: function () { return 'Europe/Kyiv'; }
+        },
+        function () {
+          return fetchMetaAccountDays_('act_1', '2026-10-13', '2026-10-13', fxSettings(), {}, { yes: {}, no: {} });
+        }
+      );
+    }
+    t.throws(function () {
+      run({ date_start: '2026-10-13', spend: '0', impressions: '0', inline_link_clicks: '301', actions: [] });
+    });
+    const ok = run({ date_start: '2026-10-13', spend: '4100', impressions: '30000', reach: '20000', inline_link_clicks: '301', actions: [] });
+    t.eq(ok.days[0].spend, 4100);
+  });
+}
+
 function suiteStatuses_(t) {
   // Реальна форма /order/status: id, name, group_id (скорочено)
   const real = [

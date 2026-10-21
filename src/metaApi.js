@@ -187,6 +187,23 @@ function fillMissingDays(rows, from, to) {
   });
 }
 
+// Суперечливі дні: витрати й покази = 0, але є кліки/події/витрати Direct. Так виглядала відповідь Meta 21.10.2026
+// (spend/impressions/reach = 0 за 13–20.10 при link_clicks > 0): такі дані не можна писати в Meta_Daily
+// (вони затирають правильні) і не можна показувати як «реклама не крутилась».
+function findInconsistentMetaDays(days) {
+  return days
+    .filter(function (d) {
+      const noSpend = !(Number(d.spend) > 0) && !(Number(d.impressions) > 0);
+      const hasActivity = ['link_clicks', 'view_content', 'add_to_cart', 'initiate_checkout', 'purchases', 'conversations_started', 'direct_spend'].some(function (k) {
+        return Number(d[k]) > 0;
+      });
+      return noSpend && hasActivity;
+    })
+    .map(function (d) {
+      return d.date;
+    });
+}
+
 // Повний набір днів [from, to]: рядки Meta_Daily без updated_at
 function assembleMetaDays(accountRows, campaignRows, directIds, from, to) {
   const spendBy = directSpendByDate(campaignRows, directIds);
@@ -393,6 +410,12 @@ function fetchMetaAccountDays_(accountId, from, to, settings, fxCache, dirCache)
   const currency = fetchAccountCurrency_(accountId);
   const timezone = fetchAccountTimezone_(accountId);
   const days = assembleMetaDays(accountRows, campaignRows, directIds, from, to);
+  const inconsistent = findInconsistentMetaDays(days);
+  if (inconsistent.length) {
+    const e = new Error('Meta повернула суперечливі дані: витрати й покази = 0, але є кліки/події за ' + inconsistent.length + ' дн. (' + inconsistent.slice(0, 8).join(', ') + ')');
+    e.metaInconsistent = true;
+    throw e;
+  }
   const rates = getFxRates_(currency, dateRange(from, to), settings, fxCache);
   const active = {};
   campaignRows.forEach(function (r) {

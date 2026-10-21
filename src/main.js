@@ -72,6 +72,9 @@ function errText_(e) {
 function metaAlertText_(e) {
   if (e && e.isTokenError) return '🚨 Токен Meta недійсний — потрібно оновити META_ACCESS_TOKEN';
   const base = '🚨 Дані Meta недоступні, звіт не надіслано: ' + errText_(e);
+  if (e && e.metaInconsistent) {
+    return base + '\n👉 Це схоже на збій на боці Meta (або проблему з акаунтом/оплатою). Таблицю не змінено. Перевірте витрати за ці дні в Ads Manager; звіт надійде автоматично, коли дані відновляться.';
+  }
   if (e && (e.metaCode === 200 || e.metaCode === 10)) {
     return base + '\n👉 Перевірте: Налаштування бізнесу → Системні користувачі → Reports Bot → Призначені ресурси (чи є цей акаунт) і чи не обмежено додаток Monoclo Reports. Діагностика: функція checkMeta.';
   }
