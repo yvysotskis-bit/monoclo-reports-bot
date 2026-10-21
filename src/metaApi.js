@@ -95,9 +95,27 @@ function fetchInsights(opts) {
 }
 
 const META_ACCOUNT_FIELDS = 'spend,impressions,reach,inline_link_clicks,actions,action_values';
+// 21.10.2026 запит з усіма полями разом повернув spend/impressions/reach = 0 за дні з кліками, хоча Ads Manager показував
+// нормальні витрати. Тому дані акаунта беруться трьома окремими простими запитами й склеюються за датою.
+const META_ACCOUNT_FIELD_SETS = ['spend,impressions,reach', 'inline_link_clicks', 'actions,action_values'];
 const META_CAMPAIGN_FIELDS = 'campaign_id,spend'; // actions і назва не потрібні — швидший запит
 
 // ---- чисті допоміжні ----
+
+// Склеює рядки кількох запитів Insights за date_start: {date_start: об'єднаний рядок}, відсортовано за датою
+function mergeInsightRowSets(sets) {
+  const byDate = {};
+  sets.forEach(function (rows) {
+    rows.forEach(function (r) {
+      byDate[r.date_start] = Object.assign(byDate[r.date_start] || {}, r);
+    });
+  });
+  return Object.keys(byDate)
+    .sort()
+    .map(function (d) {
+      return byDate[d];
+    });
+}
 
 const DIRECT_DESTINATION_RE = /MESSAGING|MESSENGER|DIRECT|WHATSAPP/i; // VERIFY: реальні destination_type показує discoverActions
 
@@ -393,7 +411,11 @@ function fetchAccountTimezone_(accountId) {
 
 // Один акаунт: {days (у UAH), directCampaigns (з витратами за період), currency, timezone}
 function fetchMetaAccountDays_(accountId, from, to, settings, fxCache, dirCache) {
-  const accountRows = fetchInsights({ accountId: accountId, level: 'account', since: from, until: to, fields: META_ACCOUNT_FIELDS });
+  const accountRows = mergeInsightRowSets(
+    META_ACCOUNT_FIELD_SETS.map(function (fields) {
+      return fetchInsights({ accountId: accountId, level: 'account', since: from, until: to, fields: fields });
+    })
+  );
   const campaignRows = fetchInsights({ accountId: accountId, level: 'campaign', since: from, until: to, fields: META_CAMPAIGN_FIELDS });
   const override = settingList(settings, 'direct_campaign_ids');
   let directIds;

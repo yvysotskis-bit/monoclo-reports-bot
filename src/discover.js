@@ -502,3 +502,43 @@ function checkPurchases() {
   discoverOut_(deps.store, 'checkPurchases ' + from + '…' + to + ' ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
   console.log('checkPurchases: результат у листі «Discover»');
 }
+
+// Діагностика витрат Meta: той самий день різними наборами полів. Якщо в якомусь наборі spend = 0, а в інших нормальний —
+// саме цей набір ламає відповідь (так було 21.10.2026). Результат — лист «Discover». Запуск: checkSpend().
+function checkSpend() {
+  const deps = defaultDeps();
+  const to = yesterday_(deps);
+  const from = addDays(to, -2);
+  const sets = [
+    'spend',
+    'spend,impressions',
+    'spend,reach',
+    'spend,inline_link_clicks',
+    'spend,actions',
+    'spend,impressions,reach,inline_link_clicks,actions,action_values'
+  ];
+  const rows = [];
+  getMetaAccountIds().forEach(function (id) {
+    sets.forEach(function (fields) {
+      try {
+        const out = fetchInsights({ accountId: id, level: 'account', since: from, until: to, fields: fields });
+        rows.push([
+          'набір',
+          id,
+          fields,
+          out
+            .map(function (r) {
+              return r.date_start + ': spend=' + r.spend + (r.impressions !== undefined ? ' impr=' + r.impressions : '') + (r.reach !== undefined ? ' reach=' + r.reach : '') + (r.inline_link_clicks !== undefined ? ' clicks=' + r.inline_link_clicks : '');
+            })
+            .join(' | ') || '(порожньо)',
+          '',
+          ''
+        ]);
+      } catch (e) {
+        rows.push(['набір', id, fields, 'ПОМИЛКА ' + errText_(e), '', '']);
+      }
+    });
+  });
+  discoverOut_(deps.store, 'checkSpend ' + from + '…' + to + ' ' + dateTimeInTz(deps.now(), KYIV_TZ), rows);
+  console.log('checkSpend: результат у листі «Discover»');
+}
